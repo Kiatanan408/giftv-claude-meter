@@ -161,6 +161,9 @@ give it your 2.4 GHz WiFi (⚠️ **not** 5 GHz — the device silently ignores
 5 GHz networks), then find its new LAN IP from your router's client list
 or the device screen on boot.
 
+Clock/date on the display uses your system's local timezone automatically —
+no configuration needed.
+
 ## What's on screen
 
 - **Header:** small mini mascot icon + "CLAUDE" title (hand-drawn pixel font)

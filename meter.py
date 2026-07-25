@@ -9,13 +9,10 @@ import json
 import requests
 from pathlib import Path
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw
 
 load_dotenv()
-
-THAI_TZ = ZoneInfo("Asia/Bangkok")
 
 GIFTV_IP = os.getenv("GIFTV_IP", "192.168.1.40")
 GIFTV_UPLOAD_URL = os.getenv("GIFTV_UPLOAD_URL", f"http://{GIFTV_IP}/doUpload?dir=/image/")
@@ -375,12 +372,14 @@ def draw_meter_image(state: dict) -> Path:
     walk_left, walk_right = 40, 200
     walk_baseline = 236
 
-    # Live Thai clock — same text baked into every frame (the GIF loops fast;
-    # the date/time isn't meant to animate within one generated image).
-    # Dropped the weekday (e.g. "SUN") to save width/height, same as the
-    # font-collision fallback already noted in the README for this row.
-    now_th = datetime.now(THAI_TZ)
-    datetime_text = now_th.strftime("%d %b %H:%M")
+    # Live clock — system local time (no timezone dependency), so a clone of
+    # this repo shows the right time on whatever machine runs it. Same text
+    # baked into every frame (the GIF loops fast; it isn't meant to animate
+    # within one generated image). Dropped the weekday and "·" separator —
+    # "Sun 26 Jul · 14:32" measures ~216px at this font/scale and overflows
+    # the 240px canvas starting from x=52; "26 Jul 14:32" fits comfortably.
+    now_local = datetime.now()
+    datetime_text = now_local.strftime("%d %b %H:%M")
 
     frames = []
     for i in range(N_FRAMES):
