@@ -34,9 +34,12 @@ STALE_AFTER_HOURS = 2  # warn (not error) if Claude Code hasn't refreshed the fi
 LOG_DIR = SCRIPT_DIR / "logs"
 STATE_FILE = SCRIPT_DIR / "token_state.json"
 WEATHER_STATE_FILE = SCRIPT_DIR / "weather_state.json"
-WEATHER_CACHE_MINUTES = 45  # both ipapi.co and open-meteo are free/rate-limited; no need to hit either every 1-minute run
-WEATHER_RETRY_MINUTES = 10  # backoff on *failed* lookups too — without this, a down/rate-limited API gets hit
-# every single 1-minute run forever, which is what keeps a free-tier rate limit from ever clearing
+WEATHER_CACHE_MINUTES = 45  # open-meteo forecast cache — location doesn't gate this anymore, see LOCATION_CACHE_HOURS
+LOCATION_CACHE_HOURS = 24  # ipapi.co lookup cache — this machine's location basically never changes, so there's no
+# reason to re-hit ipapi.co every time the (much shorter) weather cache expires. Decoupling these two is what stops
+# ipapi.co's free-tier rate limit from getting hammered every 30-60 minutes.
+WEATHER_RETRY_MINUTES = 10  # backoff on *failed* location lookups too — without this, a down/rate-limited ipapi.co
+# gets hit every single 1-minute run forever, which is what keeps its rate limit from ever clearing
 IMAGE_FILE = SCRIPT_DIR / "claude-meter.gif"
 
 LOG_DIR.mkdir(exist_ok=True)
@@ -130,70 +133,85 @@ def _weather_icon_category(code: int) -> str:
     return "cloudy"
 
 
-def get_location(cache: dict):
+def get_location(state: dict):
     """
     IP-based geolocation (ipapi.co — free, no API key) so the display shows
     wherever this script is actually running, instead of a hardcoded city.
+
+    Cached in state["location"] for LOCATION_CACHE_HOURS (24h) — this is
+    decoupled from the much shorter weather cache on purpose: the machine's
+    location practically never changes, so re-hitting ipapi.co every time
+    the 30-60min weather cache expires was hammering its free-tier rate
+    limit for no reason. As long as the location cache is still valid, this
+    returns straight from it without calling ipapi.co at all.
+
     Falls back to the last cached lat/lon/city on any failure (offline,
-    rate-limited, etc.) rather than erroring.
+    rate-limited, etc.) rather than erroring, and backs off failed retries
+    (WEATHER_RETRY_MINUTES) so a down/rate-limited ipapi.co doesn't get
+    hit every single 1-minute run.
     """
+    location = state.get("location")
+    if location:
+        age_hours = (datetime.now().timestamp() - location["fetched_at"]) / 3600
+        if age_hours < LOCATION_CACHE_HOURS:
+            return location["lat"], location["lon"], location["city"]
+
+    last_attempt = state.get("location_last_attempt")
+    if last_attempt is not None:
+        attempt_age_minutes = (datetime.now().timestamp() - last_attempt) / 60
+        if attempt_age_minutes < WEATHER_RETRY_MINUTES:
+            log_message(
+                f"Skipping location retry ({attempt_age_minutes:.0f}m since last attempt, "
+                f"backing off {WEATHER_RETRY_MINUTES}m)"
+            )
+            if location:
+                return location["lat"], location["lon"], location["city"]
+            return None, None, None
+
+    state["location_last_attempt"] = datetime.now().timestamp()
+    save_weather_state(state)
+
     try:
         resp = requests.get("https://ipapi.co/json/", timeout=5)
         data = resp.json()
         lat, lon, city = data["latitude"], data["longitude"], data.get("city", "-")
-        log_message(f"IP geolocation: {city} ({lat}, {lon})")
+        state["location"] = {"lat": lat, "lon": lon, "city": city, "fetched_at": datetime.now().timestamp()}
+        save_weather_state(state)
+        log_message(f"IP geolocation: {city} ({lat}, {lon}) — cached {LOCATION_CACHE_HOURS}h")
         return lat, lon, city
     except Exception as e:
-        log_message(f"IP geolocation failed: {e} — using last cached location")
-        if "lat" in cache and "lon" in cache:
-            return cache["lat"], cache["lon"], cache.get("city", "-")
+        log_message(f"IP geolocation failed: {e}")
+        if location:
+            log_message("Using stale cached location")
+            return location["lat"], location["lon"], location["city"]
         log_message("No cached location available yet")
         return None, None, None
 
 
 def get_weather():
     """
-    Current temperature + condition from Open-Meteo (free, no API key).
-    Cached for WEATHER_CACHE_MINUTES in WEATHER_STATE_FILE — this and the IP
-    geolocation lookup both stay skipped while the cache is fresh, since the
-    script already runs every 1 minute and weather doesn't change that fast.
+    Current temperature + condition from Open-Meteo (free, no API key), using
+    the lat/lon from get_location()'s own long-lived cache. Weather itself is
+    cached separately in state["weather"] for WEATHER_CACHE_MINUTES (30-60min)
+    since forecasts do need to refresh more often than location.
 
     Never raises on failure (no internet, API down, no location yet) — falls
     back to the last cached weather, or None if nothing has ever been cached.
-
-    Backs off on failed attempts too (WEATHER_RETRY_MINUTES), not just
-    successful ones — otherwise a down/rate-limited API gets re-hit on
-    every single 1-minute run, which is self-defeating against a free-tier
-    rate limit.
     """
-    cache = load_weather_state()
-    cached_at = cache.get("cached_at")
-    if cached_at is not None:
-        age_minutes = (datetime.now().timestamp() - cached_at) / 60
-        if age_minutes < WEATHER_CACHE_MINUTES and "temp_c" in cache:
-            log_message(
-                f"Weather cache hit ({age_minutes:.0f}m old): {cache.get('city')} {cache['temp_c']}°C"
-            )
-            return cache
+    state = load_weather_state()
+    weather = state.get("weather")
+    city = state.get("location", {}).get("city", "-")
+    if weather is not None:
+        age_minutes = (datetime.now().timestamp() - weather["cached_at"]) / 60
+        if age_minutes < WEATHER_CACHE_MINUTES:
+            log_message(f"Weather cache hit ({age_minutes:.0f}m old): {city} {weather['temp_c']}°C")
+            return {**weather, "city": city}
 
-    last_attempt = cache.get("last_attempt")
-    if last_attempt is not None:
-        attempt_age_minutes = (datetime.now().timestamp() - last_attempt) / 60
-        if attempt_age_minutes < WEATHER_RETRY_MINUTES:
-            log_message(
-                f"Skipping weather retry ({attempt_age_minutes:.0f}m since last attempt, "
-                f"backing off {WEATHER_RETRY_MINUTES}m)"
-            )
-            return cache if "temp_c" in cache else None
-
-    cache["last_attempt"] = datetime.now().timestamp()
-    save_weather_state(cache)
-
-    lat, lon, city = get_location(cache)
+    lat, lon, city = get_location(state)
     if lat is None:
-        if "temp_c" in cache:
+        if weather is not None:
             log_message("Using stale cached weather (no location available)")
-            return cache
+            return {**weather, "city": city}
         return None
 
     try:
@@ -207,22 +225,15 @@ def get_weather():
         code = int(current["weather_code"])
         icon = _weather_icon_category(code)
 
-        state = {
-            "lat": lat,
-            "lon": lon,
-            "city": city,
-            "temp_c": temp_c,
-            "weather_code": code,
-            "icon": icon,
-            "cached_at": datetime.now().timestamp(),
-        }
+        weather = {"temp_c": temp_c, "weather_code": code, "icon": icon, "cached_at": datetime.now().timestamp()}
+        state["weather"] = weather
         save_weather_state(state)
         log_message(f"Weather: {city} {temp_c}°C, code {code} ({icon})")
-        return state
+        return {**weather, "city": city}
     except Exception as e:
         log_message(f"Weather fetch failed: {e} — using last cached weather")
-        if "temp_c" in cache:
-            return cache
+        if weather is not None:
+            return {**weather, "city": city}
         return None
 
 
