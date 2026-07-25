@@ -9,10 +9,13 @@ import json
 import requests
 from pathlib import Path
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw
 
 load_dotenv()
+
+THAI_TZ = ZoneInfo("Asia/Bangkok")
 
 GIFTV_IP = os.getenv("GIFTV_IP", "192.168.1.40")
 GIFTV_UPLOAD_URL = os.getenv("GIFTV_UPLOAD_URL", f"http://{GIFTV_IP}/doUpload?dir=/image/")
@@ -181,20 +184,28 @@ def get_token_usage():
 # here if new text is ever needed. '1' = filled pixel, '0' = empty.
 PIXEL_FONT = {
     "A": ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
+    "B": ["11110", "10001", "10001", "11110", "10001", "10001", "11110"],
     "C": ["01111", "10000", "10000", "10000", "10000", "10000", "01111"],
     "D": ["11110", "10001", "10001", "10001", "10001", "10001", "11110"],
     "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+    "F": ["11111", "10000", "10000", "11110", "10000", "10000", "10000"],
+    "G": ["01111", "10000", "10000", "10011", "10001", "10001", "01111"],
     "H": ["10001", "10001", "10001", "11111", "10001", "10001", "10001"],
+    "J": ["00111", "00010", "00010", "00010", "00010", "10010", "01100"],
     "K": ["10001", "10010", "10100", "11000", "10100", "10010", "10001"],
     "L": ["10000", "10000", "10000", "10000", "10000", "10000", "11111"],
     "M": ["10001", "11011", "10101", "10001", "10001", "10001", "10001"],
     "N": ["10001", "11001", "10101", "10011", "10001", "10001", "10001"],
+    "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+    "P": ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
     "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
     "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
     "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
     "U": ["10001", "10001", "10001", "10001", "10001", "10001", "01110"],
+    "V": ["10001", "10001", "10001", "10001", "10001", "01010", "00100"],
     "W": ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
     "Y": ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
+    ":": ["00000", "00100", "00100", "00000", "00100", "00100", "00000"],
     "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
     "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
     "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
@@ -364,6 +375,13 @@ def draw_meter_image(state: dict) -> Path:
     walk_left, walk_right = 40, 200
     walk_baseline = 236
 
+    # Live Thai clock — same text baked into every frame (the GIF loops fast;
+    # the date/time isn't meant to animate within one generated image).
+    # Dropped the weekday (e.g. "SUN") to save width/height, same as the
+    # font-collision fallback already noted in the README for this row.
+    now_th = datetime.now(THAI_TZ)
+    datetime_text = now_th.strftime("%d %b %H:%M")
+
     frames = []
     for i in range(N_FRAMES):
         img = Image.new("RGB", (240, 240), color=BG_COLOR)
@@ -374,15 +392,20 @@ def draw_meter_image(state: dict) -> Path:
         _draw_pixel_text(draw, 32, 6, "CLAUDE", TITLE_SCALE, TEXT_COLOR)
         _draw_capybara(draw, 220, 34, scale=0.5)
 
-        # Current bar
-        _draw_pixel_text(draw, 6, 36, f"CURRENT {current_percent:.0f}%", LABEL_SCALE, TEXT_COLOR)
-        _draw_bar(draw, 6, 61, 228, 18, current_percent, CURRENT_BAR_COLOR)
-        _draw_pixel_text(draw, 6, 83, f"RESET {current_reset}", SMALL_SCALE, DIM_TEXT_COLOR)
+        # Thai local date/time, right under the title
+        _draw_pixel_text(draw, 52, 38, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+
+        # Current bar (shifted down 19px from its original position to make
+        # room for the date/time row above; bar height trimmed 18->16 to
+        # keep clearance above the walking mascot at the bottom)
+        _draw_pixel_text(draw, 6, 55, f"CURRENT {current_percent:.0f}%", LABEL_SCALE, TEXT_COLOR)
+        _draw_bar(draw, 6, 79, 228, 16, current_percent, CURRENT_BAR_COLOR)
+        _draw_pixel_text(draw, 6, 98, f"RESET {current_reset}", SMALL_SCALE, DIM_TEXT_COLOR)
 
         # Weekly bar — real official % (7-day rate_limits window)
-        _draw_pixel_text(draw, 6, 103, f"WEEKLY {weekly_percent:.0f}%", LABEL_SCALE, TEXT_COLOR)
-        _draw_bar(draw, 6, 128, 228, 18, weekly_percent, WEEKLY_BAR_COLOR)
-        _draw_pixel_text(draw, 6, 150, f"RESET {weekly_reset}", SMALL_SCALE, DIM_TEXT_COLOR)
+        _draw_pixel_text(draw, 6, 116, f"WEEKLY {weekly_percent:.0f}%", LABEL_SCALE, TEXT_COLOR)
+        _draw_bar(draw, 6, 140, 228, 16, weekly_percent, WEEKLY_BAR_COLOR)
+        _draw_pixel_text(draw, 6, 159, f"RESET {weekly_reset}", SMALL_SCALE, DIM_TEXT_COLOR)
 
         # Walking mascot: triangle wave position across the N_FRAMES loop
         t = i / (N_FRAMES - 1)
