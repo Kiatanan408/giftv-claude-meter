@@ -427,24 +427,28 @@ def _draw_bevel_block(draw, x0, y0, x1, y1, base, light, dark, bevel=2):
 
 def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
     """
-    Blocky pixel mascot at (x, y_baseline) — feet touch y_baseline. Body and
-    legs use bevel-shaded blocks (light top/left, dark bottom/right) for a
-    2.5D look, plus a soft ground shadow beneath the feet; eyes stay flat
-    (no bevel) so they read clearly against the shaded body.
-    leg_forward: True/False alternates which leg is forward (walk cadence)
+    Blocky pixel mascot at (x, y_baseline) — feet touch y_baseline. Squat
+    proportions (wide, short body, no arms, 4 legs spread across the width)
+    adapted from the make_mascot_squat.py reference's 7x2-unit body/leg
+    layout. Body and legs use bevel-shaded blocks (light top/left, dark
+    bottom/right), plus a soft ground shadow beneath the feet; eyes stay
+    flat (no bevel) so they read clearly against the shaded body.
+    leg_forward: alternates which diagonal pair of the 4 legs is raised,
+    the walk cadence (equivalent to the old 2-leg stagger, extended to 4).
     blinking: True draws closed eyes for this frame
     scale: shrinks every dimension proportionally — scale=1.0 is the big
     walking mascot at the bottom; a small scale (with leg_forward=False,
     blinking=False) gives a static title-icon version of the same shape.
     """
-    body_w, body_h = max(2, int(30 * scale)), max(2, int(36 * scale))
+    body_w, body_h = max(4, int(42 * scale)), max(2, int(14 * scale))
     body_x = x - body_w // 2
-    body_y = y_baseline - body_h - int(16 * scale)  # leave room for legs below body
+    body_y = y_baseline - body_h - max(1, int(8 * scale))  # leave room for legs below body
     bevel = max(1, round(2 * scale))
 
     # Soft ground shadow, drawn first (under everything) so it reads as the
     # mascot standing on the floor rather than floating — moves with x/legs
-    # every frame since it's derived from the same params as the rest.
+    # every frame since it's derived from the same params as the rest. Scales
+    # with body_w automatically, so it's already wider on the wider body.
     shadow_w = int(body_w * 1.4)
     shadow_h = max(2, int(6 * scale))
     shadow_cy = y_baseline - max(1, int(2 * scale))
@@ -453,47 +457,26 @@ def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
         fill=GROUND_SHADOW_COLOR,
     )
 
-    leg_w, leg_h = max(1, int(8 * scale)), max(1, int(16 * scale))
-    leg_gap = max(1, int(2 * scale))
-    leg_stagger = max(1, int(5 * scale))
-    leg_y = body_y + body_h - max(1, int(6 * scale))
-    if leg_forward:
-        _draw_bevel_block(
-            draw, body_x - leg_gap, leg_y, body_x - leg_gap + leg_w, leg_y + leg_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel
-        )
-        _draw_bevel_block(
-            draw,
-            body_x + body_w - leg_w + leg_gap,
-            leg_y - leg_stagger,
-            body_x + body_w + leg_gap,
-            leg_y + leg_h - leg_stagger,
-            MASCOT_COLOR,
-            MASCOT_LIGHT,
-            MASCOT_DARK,
-            bevel,
-        )
-    else:
-        _draw_bevel_block(
-            draw,
-            body_x - leg_gap,
-            leg_y - leg_stagger,
-            body_x - leg_gap + leg_w,
-            leg_y + leg_h - leg_stagger,
-            MASCOT_COLOR,
-            MASCOT_LIGHT,
-            MASCOT_DARK,
-            bevel,
-        )
-        _draw_bevel_block(
-            draw, body_x + body_w - leg_w + leg_gap, leg_y, body_x + body_w + leg_gap, leg_y + leg_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel
-        )
+    # 4 legs spread across the wider body (positions match the reference's
+    # gx=[0.3, 2.1, 3.9, 5.7] out of a 7-unit-wide body, as x-fractions).
+    leg_w = max(1, int(5 * scale))
+    leg_h = max(1, int(10 * scale))
+    leg_y = body_y + body_h - max(1, int(2 * scale))
+    leg_stagger = max(1, int(4 * scale))
+    leg_x_fractions = (0.3 / 7, 2.1 / 7, 3.9 / 7, 5.7 / 7)
+    for idx, frac in enumerate(leg_x_fractions):
+        leg_x = body_x + int(frac * body_w)
+        raised = (idx % 2 == 0) == leg_forward  # alternating diagonal pairs, like a 4-legged trot
+        ly = leg_y - leg_stagger if raised else leg_y
+        _draw_bevel_block(draw, leg_x, ly, leg_x + leg_w, ly + leg_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
 
     # Body
     _draw_bevel_block(draw, body_x, body_y, body_x + body_w, body_y + body_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
 
-    # Eyes
-    eye_inset = max(1, int(5 * scale))
-    eye_y = body_y + max(1, int(9 * scale))
+    # Eyes — positioned within the wider/shorter body (reference's gx=1.7/4.3
+    # out of 7 units, gy=0.6 out of 2 units)
+    eye_inset = max(1, int(10 * scale))
+    eye_y = body_y + max(1, int(4 * scale))
     eye_size = max(1, int(5 * scale))
     if blinking:
         lw = max(1, int(2 * scale))
@@ -806,7 +789,7 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     # it is left-to-right. Mirrors the body_y formula inside
     # _draw_walking_mascot.
     FLOAT_ICON_SIZE = 24  # +71% vs the base 14px icon — the old inline size read as invisible above the mascot
-    mascot_head_top = walk_baseline - max(2, int(36 * WALK_SCALE)) - int(16 * WALK_SCALE)
+    mascot_head_top = walk_baseline - max(2, int(14 * WALK_SCALE)) - max(1, int(8 * WALK_SCALE))
     FLOAT_GAP = 4
     float_icon_y = mascot_head_top - FLOAT_ICON_SIZE - FLOAT_GAP
 
