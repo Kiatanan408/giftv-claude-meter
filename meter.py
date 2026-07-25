@@ -61,15 +61,18 @@ TEXT_COLOR = (220, 220, 220)
 DIM_TEXT_COLOR = (150, 150, 160)
 CARROT_COLOR = (255, 140, 0)
 LEAF_COLOR = (76, 175, 80)
-SUN_COLOR = (255, 205, 60)
-CLOUD_COLOR = (185, 185, 200)
-CLOUD_SHADOW_COLOR = (140, 140, 158)
-RAIN_COLOR = (100, 150, 230)
+SUN_COLOR = (255, 160, 20)
+SUN_CORE_COLOR = (255, 200, 60)
+CLOUD_COLOR = (198, 210, 238)
+CLOUD_SHADOW_COLOR = (120, 132, 168)
+STORM_CLOUD_COLOR = (70, 78, 105)
+STORM_SHADOW_COLOR = (40, 44, 62)
+RAIN_COLOR = (80, 130, 220)
 SNOW_COLOR = (235, 235, 245)
-BOLT_COLOR = (255, 220, 80)
+BOLT_COLOR = (255, 205, 40)
 FOG_COLOR = (150, 150, 165)
-MOON_COLOR = (225, 225, 240)
-STAR_COLOR = (255, 250, 210)
+MOON_COLOR = (255, 205, 70)
+STAR_COLOR = (255, 215, 90)
 
 WALK_SCALE = 1.05  # dialed back down from 1.3 — combined with the floating weather icon above it, that felt cluttered
 
@@ -646,8 +649,9 @@ def _icon_sc(size):
 
 
 def draw_sun(draw, x, y, size):
-    """8-ray sun — adapted from the make_weather_set.py reference, scaled way down
-    (that version used r=20-26 for a 240px cell; ours needs to read at 14-24px total)."""
+    """8-ray sun with a lighter core — adapted from the make_weather_set.py /
+    make_weather_vivid.py references, scaled way down (those versions used
+    r=20-26 for a 240px cell; ours needs to read at 14-24px total)."""
     sc = _icon_sc(size)
     r = sc(4)
     cx, cy = x + sc(7), y + sc(7)
@@ -655,11 +659,15 @@ def draw_sun(draw, x, y, size):
     for ddx, ddy in ((-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)):
         draw.line([(cx, cy), (cx + ddx * ray, cy + ddy * ray)], fill=SUN_COLOR, width=sc(1))
     draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=SUN_COLOR)
+    core_r = max(1, r - sc(2))
+    draw.ellipse([(cx - core_r, cy - core_r), (cx + core_r, cy + core_r)], fill=SUN_CORE_COLOR)
 
 
-def draw_cloud(draw, x, y, size):
+def draw_cloud(draw, x, y, size, color=CLOUD_COLOR, shadow=CLOUD_SHADOW_COLOR):
     """Puffy 3-bump cloud with a soft shadow layer underneath, adapted from the
-    reference's 5-puff-plus-shadow design (compressed to 3 puffs to fit our tiny icon box)."""
+    reference's 5-puff-plus-shadow design (compressed to 3 puffs to fit our
+    tiny icon box). color/shadow overrideable — cloud_thunder passes the
+    darker STORM_CLOUD_COLOR/STORM_SHADOW_COLOR pair instead of the default."""
     sc = _icon_sc(size)
     puffs = [
         (x + sc(3), y + sc(7), sc(3)),
@@ -668,10 +676,10 @@ def draw_cloud(draw, x, y, size):
     ]
     shadow_dy = sc(1)
     for px, py, pr in puffs:
-        draw.ellipse([(px - pr, py - pr + shadow_dy), (px + pr, py + pr + shadow_dy)], fill=CLOUD_SHADOW_COLOR)
+        draw.ellipse([(px - pr, py - pr + shadow_dy), (px + pr, py + pr + shadow_dy)], fill=shadow)
     for px, py, pr in puffs:
-        draw.ellipse([(px - pr, py - pr), (px + pr, py + pr)], fill=CLOUD_COLOR)
-    draw.rectangle([(x + sc(1), y + sc(7)), (x + sc(13), y + sc(11))], fill=CLOUD_COLOR)
+        draw.ellipse([(px - pr, py - pr), (px + pr, py + pr)], fill=color)
+    draw.rectangle([(x + sc(1), y + sc(7)), (x + sc(13), y + sc(11))], fill=color)
 
 
 def draw_moon(draw, x, y, size):
@@ -777,7 +785,7 @@ def _draw_weather_icon(draw, x, y, category, size=WEATHER_ICON_SIZE):
         draw_cloud(draw, x, y, size)
         draw_snow(draw, x, y, size)
     elif category == "cloud_thunder":
-        draw_cloud(draw, x, y, size)
+        draw_cloud(draw, x, y, size, color=STORM_CLOUD_COLOR, shadow=STORM_SHADOW_COLOR)
         draw_bolt(draw, x, y, size)
 
 
