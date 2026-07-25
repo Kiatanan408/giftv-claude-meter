@@ -47,7 +47,7 @@ LOG_FILE = LOG_DIR / "meter.log"
 
 # --- GIF animation constants ---
 N_FRAMES = 40
-FRAME_DURATION_MS = 70
+FRAME_DURATION_MS = 140  # was 70 — walking mascot felt too fast; this halves its perceived speed
 BG_COLOR = (18, 16, 22)
 MASCOT_COLOR = (232, 92, 55)
 MASCOT_LIGHT = tuple(min(255, c + 40) for c in MASCOT_COLOR)  # bevel highlight (top/left faces)
@@ -436,9 +436,9 @@ def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
     leg_forward: alternates which diagonal pair of the 4 legs is raised,
     the walk cadence (equivalent to the old 2-leg stagger, extended to 4).
     blinking: True draws closed eyes for this frame
-    scale: shrinks every dimension proportionally — scale=1.0 is the big
-    walking mascot at the bottom; a small scale (with leg_forward=False,
-    blinking=False) gives a static title-icon version of the same shape.
+    scale: shrinks every dimension proportionally.
+    Used only for the walking mascot at the bottom now — the CLAUDE title
+    row has its own distinct _draw_header_mascot (tall, with arms) below.
     """
     body_w, body_h = max(4, int(42 * scale)), max(2, int(14 * scale))
     body_x = x - body_w // 2
@@ -491,6 +491,64 @@ def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
         draw.rectangle(
             [(body_x + body_w - eye_inset - eye_size, eye_y), (body_x + body_w - eye_inset, eye_y + eye_size)], fill=BG_COLOR
         )
+
+
+def _draw_header_mascot(draw, x, y_baseline, scale=1.0):
+    """
+    Static mascot icon for the CLAUDE title row only — deliberately kept
+    separate from _draw_walking_mascot now that the two have diverged:
+    this one keeps the original tall 5x3-unit body proportions (as opposed
+    to the walking mascot's wide/squat 7x2 redesign) and has arms, adapted
+    from the make_mascot_header_tall.py reference, lengthened to 1.4 units
+    (from that reference's own 1.0-unit arms). Still 4 legs, bevel shading,
+    and a ground shadow, matching the walking mascot's current look.
+    Always static — nothing currently animates this instance, so there's
+    no leg_forward/blinking parameter here.
+    """
+    body_w, body_h = max(2, int(30 * scale)), max(2, int(36 * scale))
+    body_x = x - body_w // 2
+    leg_h = max(1, int(body_h / 3))
+    body_y = y_baseline - body_h - max(1, int(leg_h * 0.8))
+    bevel = max(1, round(2 * scale))
+
+    # Ground shadow — wider ratio than the walking mascot's (1.4x) since the
+    # arms extend the visual footprint further out to each side.
+    shadow_w = int(body_w * 1.8)
+    shadow_h = max(2, int(body_h * 0.2))
+    shadow_cy = y_baseline - max(1, int(2 * scale))
+    draw.ellipse(
+        [(x - shadow_w // 2, shadow_cy - shadow_h // 2), (x + shadow_w // 2, shadow_cy + shadow_h // 2)],
+        fill=GROUND_SHADOW_COLOR,
+    )
+
+    # 4 legs — reference's gx=[0, 1.3, 2.6, 3.9] out of a 5-unit-wide body
+    leg_w = max(1, int(0.16 * body_w))
+    leg_y = body_y + body_h - max(1, int(2 * scale))
+    for frac in (0 / 5, 1.3 / 5, 2.6 / 5, 3.9 / 5):
+        leg_x = body_x + int(frac * body_w)
+        _draw_bevel_block(draw, leg_x, leg_y, leg_x + leg_w, leg_y + leg_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
+
+    # Arms — 1.4 units long (the reference's earlier draft used 1.0),
+    # attached at the body's vertical middle band
+    arm_len = max(1, int(0.28 * body_w))
+    arm_h = leg_h
+    arm_y = body_y + max(1, int(body_h / 3))
+    _draw_bevel_block(draw, body_x - arm_len, arm_y, body_x, arm_y + arm_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
+    _draw_bevel_block(
+        draw, body_x + body_w, arm_y, body_x + body_w + arm_len, arm_y + arm_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel
+    )
+
+    # Body
+    _draw_bevel_block(draw, body_x, body_y, body_x + body_w, body_y + body_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
+
+    # Eyes — reference's gx=[1.1, 3.1] / gy=0.9 out of a 5x3-unit body
+    eye_inset = max(1, int(1.1 / 5 * body_w))
+    eye_y = body_y + max(1, int(0.3 * body_h))
+    eye_size = max(1, int(0.8 / 5 * body_w))
+    draw.rectangle([(body_x + eye_inset, eye_y), (body_x + eye_inset + eye_size, eye_y + eye_size)], fill=BG_COLOR)
+    draw.rectangle(
+        [(body_x + body_w - eye_inset - eye_size, eye_y), (body_x + body_w - eye_inset, eye_y + eye_size)], fill=BG_COLOR
+    )
 
 
 def _draw_capybara(draw, x, y_baseline, scale=1.0):
@@ -814,8 +872,8 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         img = Image.new("RGB", (240, 240), color=BG_COLOR)
         draw = ImageDraw.Draw(img)
 
-        # Title row: static (non-walking) mini mascot icon + "CLAUDE" + corner capybara
-        _draw_walking_mascot(draw, 16, 34, leg_forward=False, blinking=False, scale=0.55)
+        # Title row: static tall/armed mini mascot icon + "CLAUDE" + corner capybara
+        _draw_header_mascot(draw, 16, 34, scale=0.55)
         _draw_pixel_text(draw, 32, 6, "CLAUDE", TITLE_SCALE, TEXT_COLOR)
         _draw_capybara(draw, CAPY_X, CAPY_BASELINE, scale=CAPY_SCALE)
 
