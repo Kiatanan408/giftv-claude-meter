@@ -596,7 +596,6 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     BAR_WIDTH = 150  # reset countdown (SMALL_SCALE 2) needs ~72px beside the
     # bar for worst-case "4H 59M"/"6D 23H" — 150 leaves enough room without overflow.
     BAR_HEIGHT = 16
-    RIGHT_MARGIN = 6
 
     CAPY_SCALE = 1.2
     CAPY_X = 210
@@ -617,43 +616,27 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         temp_text = None
         icon_category = None
 
-    # Decide 1-line vs 2-line layout for date+weather up front (same for
-    # every frame) — measure actual pixel width with our own font metrics,
-    # the hand-drawn-font equivalent of a textbbox check.
-    #
-    # This whole date/time/weather block gets its own padded "box" (extra
-    # gap above, extra gap below, text vertically centered against the
-    # 14px-tall weather icon) instead of being just another tight text row —
-    # smaller fonts elsewhere freed up vertical room, and this is where it
-    # was asked to go.
-    weather_box_y = 6 + TITLE_H + 16  # extra room for the now-bigger corner capybara
-    text_center_offset = (WEATHER_ICON_SIZE - SMALL_H) // 2
-    icon_gap, temp_gap = 4, 3
-    date_width = _pixel_text_width(datetime_text, SMALL_SCALE)
-    if weather_available:
-        temp_width = _pixel_text_width(temp_text, SMALL_SCALE)
-        one_line_width = date_width + icon_gap + WEATHER_ICON_SIZE + temp_gap + temp_width
-        one_line_fits = (6 + one_line_width) <= (240 - RIGHT_MARGIN)
-    else:
-        one_line_fits = True
-
-    if weather_available and one_line_fits:
-        icon_row_y = weather_box_y
-        text_row_y = weather_box_y + text_center_offset
-        content_top_y = weather_box_y + WEATHER_ICON_SIZE + 8
-    elif weather_available:
-        text_row_y = weather_box_y
-        icon_row_y = weather_box_y + SMALL_H + 3
-        content_top_y = icon_row_y + WEATHER_ICON_SIZE + 8
-    else:
-        text_row_y = weather_box_y
-        icon_row_y = None
-        content_top_y = weather_box_y + SMALL_H + 8
+    # Date/time is back to being just its own simple row — weather moved to
+    # float above the walking mascot instead (see the per-frame loop below).
+    weather_box_y = 6 + TITLE_H + 16  # extra room for the bigger corner capybara
+    text_row_y = weather_box_y
+    content_top_y = weather_box_y + SMALL_H + 6
 
     cur_label_y = content_top_y
-    cur_bar_y = cur_label_y + LABEL_H + 3
-    week_label_y = cur_bar_y + BAR_HEIGHT + 4
-    week_bar_y = week_label_y + LABEL_H + 3
+    cur_bar_y = cur_label_y + LABEL_H + 2
+    week_label_y = cur_bar_y + BAR_HEIGHT + 3
+    week_bar_y = week_label_y + LABEL_H + 2
+
+    # The floating weather icon tracks the walking mascot's x position every
+    # frame, but its y is constant — the mascot's head height above
+    # walk_baseline never changes, only where it is left-to-right. Mirrors
+    # the body_y formula inside _draw_walking_mascot.
+    mascot_head_top = walk_baseline - max(2, int(36 * WALK_SCALE)) - int(16 * WALK_SCALE)
+    FLOAT_GAP = 3
+    float_icon_y = mascot_head_top - WEATHER_ICON_SIZE - FLOAT_GAP
+    float_temp_gap = 3
+    temp_width = _pixel_text_width(temp_text, SMALL_SCALE) if weather_available else 0
+    float_cluster_width = WEATHER_ICON_SIZE + float_temp_gap + temp_width
 
     frames = []
     for i in range(N_FRAMES):
@@ -665,23 +648,8 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         _draw_pixel_text(draw, 32, 6, "CLAUDE", TITLE_SCALE, TEXT_COLOR)
         _draw_capybara(draw, CAPY_X, CAPY_BASELINE, scale=CAPY_SCALE)
 
-        # Local date/time, optionally with weather icon + temp inline (or on
-        # its own second small line if it doesn't fit next to the date)
-        if weather_available and one_line_fits:
-            cx = 6
-            cx += _draw_pixel_text(draw, cx, text_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
-            cx += icon_gap
-            _draw_weather_icon(draw, cx, icon_row_y, icon_category)
-            cx += WEATHER_ICON_SIZE + temp_gap
-            _draw_pixel_text(draw, cx, text_row_y, temp_text, SMALL_SCALE, TEXT_COLOR)
-        elif weather_available:
-            _draw_pixel_text(draw, 6, text_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
-            _draw_weather_icon(draw, 6, icon_row_y, icon_category)
-            _draw_pixel_text(
-                draw, 6 + WEATHER_ICON_SIZE + temp_gap, icon_row_y + text_center_offset, temp_text, SMALL_SCALE, TEXT_COLOR
-            )
-        else:
-            _draw_pixel_text(draw, 6, text_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+        # Local date/time — just its own row now, no weather squeezed in
+        _draw_pixel_text(draw, 6, text_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
 
         # Current bar — reset countdown sits beside it (not its own row
         # anymore) to keep the section compact
@@ -701,6 +669,12 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         leg_forward = (i % 8) < 4
         blinking = (i % 15) in (0, 1)
         _draw_walking_mascot(draw, walk_x, walk_baseline, leg_forward, blinking, scale=WALK_SCALE)
+
+        # Weather icon floats above the mascot's head and tracks it left-right
+        if weather_available:
+            fx = walk_x - float_cluster_width // 2
+            _draw_weather_icon(draw, fx, float_icon_y, icon_category)
+            _draw_pixel_text(draw, fx + WEATHER_ICON_SIZE + float_temp_gap, float_icon_y, temp_text, SMALL_SCALE, TEXT_COLOR)
 
         frames.append(img)
 
