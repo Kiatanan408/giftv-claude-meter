@@ -50,6 +50,9 @@ N_FRAMES = 40
 FRAME_DURATION_MS = 70
 BG_COLOR = (18, 16, 22)
 MASCOT_COLOR = (232, 92, 55)
+MASCOT_LIGHT = tuple(min(255, c + 40) for c in MASCOT_COLOR)  # bevel highlight (top/left faces)
+MASCOT_DARK = tuple(max(0, c - 45) for c in MASCOT_COLOR)  # bevel shadow (bottom/right faces)
+GROUND_SHADOW_COLOR = (10, 8, 12)
 CAPYBARA_COLOR = (163, 118, 71)
 CURRENT_BAR_COLOR = (232, 92, 55)
 WEEKLY_BAR_COLOR = (196, 224, 90)
@@ -408,9 +411,26 @@ def _draw_bar(draw, x, y, width, height, percent, fill_color):
             draw.rectangle([(x, y), (x + filled, y + height)], fill=fill_color)
 
 
+def _draw_bevel_block(draw, x0, y0, x1, y1, base, light, dark, bevel=2):
+    """
+    Block with simple bevel shading, adapted from the make_mascot_3d.py
+    reference: base fill, then a thin highlight strip on the top+left edges
+    and a thin shadow strip on the bottom+right edges — the classic 2.5D
+    "beveled button" look, at pixel-art scale.
+    """
+    draw.rectangle([(x0, y0), (x1, y1)], fill=base)
+    draw.rectangle([(x0, y0), (x1, y0 + bevel - 1)], fill=light)
+    draw.rectangle([(x0, y0), (x0 + bevel - 1, y1)], fill=light)
+    draw.rectangle([(x1 - bevel + 1, y0), (x1, y1)], fill=dark)
+    draw.rectangle([(x0, y1 - bevel + 1), (x1, y1)], fill=dark)
+
+
 def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
     """
-    Blocky pixel mascot at (x, y_baseline) — feet touch y_baseline.
+    Blocky pixel mascot at (x, y_baseline) — feet touch y_baseline. Body and
+    legs use bevel-shaded blocks (light top/left, dark bottom/right) for a
+    2.5D look, plus a soft ground shadow beneath the feet; eyes stay flat
+    (no bevel) so they read clearly against the shaded body.
     leg_forward: True/False alternates which leg is forward (walk cadence)
     blinking: True draws closed eyes for this frame
     scale: shrinks every dimension proportionally — scale=1.0 is the big
@@ -420,25 +440,56 @@ def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
     body_w, body_h = max(2, int(30 * scale)), max(2, int(36 * scale))
     body_x = x - body_w // 2
     body_y = y_baseline - body_h - int(16 * scale)  # leave room for legs below body
+    bevel = max(1, round(2 * scale))
+
+    # Soft ground shadow, drawn first (under everything) so it reads as the
+    # mascot standing on the floor rather than floating — moves with x/legs
+    # every frame since it's derived from the same params as the rest.
+    shadow_w = int(body_w * 1.4)
+    shadow_h = max(2, int(6 * scale))
+    shadow_cy = y_baseline - max(1, int(2 * scale))
+    draw.ellipse(
+        [(x - shadow_w // 2, shadow_cy - shadow_h // 2), (x + shadow_w // 2, shadow_cy + shadow_h // 2)],
+        fill=GROUND_SHADOW_COLOR,
+    )
 
     leg_w, leg_h = max(1, int(8 * scale)), max(1, int(16 * scale))
     leg_gap = max(1, int(2 * scale))
     leg_stagger = max(1, int(5 * scale))
     leg_y = body_y + body_h - max(1, int(6 * scale))
     if leg_forward:
-        draw.rectangle([(body_x - leg_gap, leg_y), (body_x - leg_gap + leg_w, leg_y + leg_h)], fill=MASCOT_COLOR)
-        draw.rectangle(
-            [(body_x + body_w - leg_w + leg_gap, leg_y - leg_stagger), (body_x + body_w + leg_gap, leg_y + leg_h - leg_stagger)],
-            fill=MASCOT_COLOR,
+        _draw_bevel_block(
+            draw, body_x - leg_gap, leg_y, body_x - leg_gap + leg_w, leg_y + leg_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel
+        )
+        _draw_bevel_block(
+            draw,
+            body_x + body_w - leg_w + leg_gap,
+            leg_y - leg_stagger,
+            body_x + body_w + leg_gap,
+            leg_y + leg_h - leg_stagger,
+            MASCOT_COLOR,
+            MASCOT_LIGHT,
+            MASCOT_DARK,
+            bevel,
         )
     else:
-        draw.rectangle([(body_x - leg_gap, leg_y - leg_stagger), (body_x - leg_gap + leg_w, leg_y + leg_h - leg_stagger)], fill=MASCOT_COLOR)
-        draw.rectangle(
-            [(body_x + body_w - leg_w + leg_gap, leg_y), (body_x + body_w + leg_gap, leg_y + leg_h)], fill=MASCOT_COLOR
+        _draw_bevel_block(
+            draw,
+            body_x - leg_gap,
+            leg_y - leg_stagger,
+            body_x - leg_gap + leg_w,
+            leg_y + leg_h - leg_stagger,
+            MASCOT_COLOR,
+            MASCOT_LIGHT,
+            MASCOT_DARK,
+            bevel,
+        )
+        _draw_bevel_block(
+            draw, body_x + body_w - leg_w + leg_gap, leg_y, body_x + body_w + leg_gap, leg_y + leg_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel
         )
 
     # Body
-    draw.rectangle([(body_x, body_y), (body_x + body_w, body_y + body_h)], fill=MASCOT_COLOR)
+    _draw_bevel_block(draw, body_x, body_y, body_x + body_w, body_y + body_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
 
     # Eyes
     eye_inset = max(1, int(5 * scale))
