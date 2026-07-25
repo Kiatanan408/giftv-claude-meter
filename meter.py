@@ -443,32 +443,11 @@ def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
             [(body_x + body_w - eye_inset - eye_size, eye_y), (body_x + body_w - eye_inset, eye_y + eye_size)], fill=BG_COLOR
         )
 
-    # Carrot party hat — orange cone sitting on the head (base dips slightly
-    # into the body for a "worn" look) with a 3-leaf green tuft at the tip.
-    hat_w = max(2, int(22 * scale))
-    hat_h = max(1, int(10 * scale))
-    hat_base_y = body_y + max(1, int(4 * scale))
-    hat_tip_y = hat_base_y - hat_h
-    draw.polygon(
-        [(x - hat_w // 2, hat_base_y), (x + hat_w // 2, hat_base_y), (x, hat_tip_y)],
-        fill=CARROT_COLOR,
-    )
-    leaf_size = max(1, int(6 * scale))
-    draw.polygon(
-        [(x, hat_tip_y), (x - leaf_size, hat_tip_y - leaf_size), (x - leaf_size // 2, hat_tip_y)], fill=LEAF_COLOR
-    )
-    draw.polygon(
-        [(x - 1, hat_tip_y), (x, hat_tip_y - leaf_size - 1), (x + 1, hat_tip_y)], fill=LEAF_COLOR
-    )
-    draw.polygon(
-        [(x, hat_tip_y), (x + leaf_size, hat_tip_y - leaf_size), (x + leaf_size // 2, hat_tip_y)], fill=LEAF_COLOR
-    )
-
 
 def _draw_capybara(draw, x, y_baseline, scale=1.0):
     """
     Static blocky pixel capybara icon (corner decoration) — wide low body,
-    small ears, blunt snout with a dark nose, capybara-brown.
+    small ears, blunt snout with a dark nose, carrot party hat on top.
     """
     body_w, body_h = max(4, int(42 * scale)), max(3, int(20 * scale))
     body_x = x - body_w // 2
@@ -516,6 +495,26 @@ def _draw_capybara(draw, x, y_baseline, scale=1.0):
         [(body_x + body_w - eye_inset - eye_size, eye_y), (body_x + body_w - eye_inset, eye_y + eye_size)], fill=BG_COLOR
     )
 
+    # Carrot party hat, centered on top of the head between the ears
+    hat_w = max(2, int(18 * scale))
+    hat_h = max(1, int(9 * scale))
+    hat_base_y = body_y + max(1, int(2 * scale))
+    hat_tip_y = hat_base_y - hat_h
+    draw.polygon(
+        [(x - hat_w // 2, hat_base_y), (x + hat_w // 2, hat_base_y), (x, hat_tip_y)],
+        fill=CARROT_COLOR,
+    )
+    leaf_size = max(1, int(5 * scale))
+    draw.polygon(
+        [(x, hat_tip_y), (x - leaf_size, hat_tip_y - leaf_size), (x - leaf_size // 2, hat_tip_y)], fill=LEAF_COLOR
+    )
+    draw.polygon(
+        [(x - 1, hat_tip_y), (x, hat_tip_y - leaf_size - 1), (x + 1, hat_tip_y)], fill=LEAF_COLOR
+    )
+    draw.polygon(
+        [(x, hat_tip_y), (x + leaf_size, hat_tip_y - leaf_size), (x + leaf_size // 2, hat_tip_y)], fill=LEAF_COLOR
+    )
+
 
 WEATHER_ICON_SIZE = 14  # square box, drawn at (x, y) top-left, matches the SMALL_SCALE text row height
 
@@ -558,9 +557,9 @@ def _draw_weather_icon(draw, x, y, category):
         return
 
 
-TITLE_SCALE = 3
-LABEL_SCALE = 2
-SMALL_SCALE = 1
+TITLE_SCALE = 4
+LABEL_SCALE = 3
+SMALL_SCALE = 2
 
 TITLE_H = PIXEL_FONT_ROWS * TITLE_SCALE
 LABEL_H = PIXEL_FONT_ROWS * LABEL_SCALE
@@ -583,11 +582,14 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
 
     walk_left, walk_right = 40, 200
     walk_baseline = 236
-    BAR_WIDTH = 180  # widened back up from the previous 150 — shrinking every
-    # font a step (see TITLE/LABEL/SMALL_SCALE above) freed up enough width
-    # that the reset countdown beside the bar no longer needs as much room.
+    BAR_WIDTH = 150  # reset countdown (SMALL_SCALE 2) needs ~72px beside the
+    # bar for worst-case "4H 59M"/"6D 23H" — 150 leaves enough room without overflow.
     BAR_HEIGHT = 16
     RIGHT_MARGIN = 6
+
+    CAPY_SCALE = 1.2
+    CAPY_X = 210
+    CAPY_BASELINE = 50
 
     # Live clock — system local time (no timezone dependency), so a clone of
     # this repo shows the right time on whatever machine runs it. Same text
@@ -613,7 +615,7 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     # 14px-tall weather icon) instead of being just another tight text row —
     # smaller fonts elsewhere freed up vertical room, and this is where it
     # was asked to go.
-    weather_box_y = 6 + TITLE_H + 6
+    weather_box_y = 6 + TITLE_H + 16  # extra room for the now-bigger corner capybara
     text_center_offset = (WEATHER_ICON_SIZE - SMALL_H) // 2
     icon_gap, temp_gap = 4, 3
     date_width = _pixel_text_width(datetime_text, SMALL_SCALE)
@@ -648,9 +650,9 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         draw = ImageDraw.Draw(img)
 
         # Title row: static (non-walking) mini mascot icon + "CLAUDE" + corner capybara
-        _draw_walking_mascot(draw, 16, 37, leg_forward=False, blinking=False, scale=0.55)
+        _draw_walking_mascot(draw, 16, 34, leg_forward=False, blinking=False, scale=0.55)
         _draw_pixel_text(draw, 32, 6, "CLAUDE", TITLE_SCALE, TEXT_COLOR)
-        _draw_capybara(draw, 220, 34, scale=0.5)
+        _draw_capybara(draw, CAPY_X, CAPY_BASELINE, scale=CAPY_SCALE)
 
         # Local date/time, optionally with weather icon + temp inline (or on
         # its own second small line if it doesn't fit next to the date)
