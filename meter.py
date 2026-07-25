@@ -65,7 +65,7 @@ SNOW_COLOR = (235, 235, 245)
 BOLT_COLOR = (255, 220, 80)
 FOG_COLOR = (150, 150, 165)
 
-WALK_SCALE = 1.3  # +30% bigger than the original walking mascot (scale 1.0)
+WALK_SCALE = 1.05  # dialed back down from 1.3 — combined with the floating weather icon above it, that felt cluttered
 
 
 def log_message(msg: str):
@@ -359,6 +359,7 @@ PIXEL_FONT = {
     ":": ["00000", "00100", "00100", "00000", "00100", "00100", "00000"],
     "°": ["01100", "10010", "10010", "01100", "00000", "00000", "00000"],
     "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
+    "·": ["00000", "00000", "00000", "01100", "01100", "00000", "00000"],
     "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
     "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
     "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
@@ -527,44 +528,58 @@ def _draw_capybara(draw, x, y_baseline, scale=1.0):
     )
 
 
-WEATHER_ICON_SIZE = 14  # square box, drawn at (x, y) top-left, matches the SMALL_SCALE text row height
+WEATHER_ICON_SIZE = 14  # base square icon box — the inline (date-row) size; see FLOAT_ICON_SIZE for the
+# bigger floating-above-mascot version. _draw_weather_icon(size=...) scales every offset proportionally.
 
 
-def _draw_weather_icon(draw, x, y, category):
+def _draw_weather_icon(draw, x, y, category, size=WEATHER_ICON_SIZE):
     """
-    Small hand-drawn weather icon (14x14) — no emoji/TTF, matching this
-    project's no-external-assets rule. `category` is one of the buckets
-    from _weather_icon_category().
+    Small hand-drawn weather icon (nominally a `size`x`size` box, base design
+    is 14x14) — no emoji/TTF, matching this project's no-external-assets
+    rule. `category` is one of the buckets from _weather_icon_category().
     """
+    s = size / WEATHER_ICON_SIZE
+
+    def sc(v):
+        return max(1, round(v * s))
+
     if category == "clear":
-        cx, cy, r = x + 7, y + 7, 4
+        r = sc(4)
+        cx, cy = x + sc(7), y + sc(7)
         draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=SUN_COLOR)
-        for dx, dy in ((0, -6), (0, 6), (-6, 0), (6, 0)):
-            draw.line([(cx, cy), (cx + dx, cy + dy)], fill=SUN_COLOR, width=1)
+        ray = sc(6)
+        for dx, dy in ((0, -ray), (0, ray), (-ray, 0), (ray, 0)):
+            draw.line([(cx, cy), (cx + dx, cy + dy)], fill=SUN_COLOR, width=sc(1))
         return
 
     # Every other category starts from the same cloud blob
-    cloud_top = y + 2 if category in ("cloudy", "fog") else y
+    cloud_top = y + sc(2) if category in ("cloudy", "fog") else y
     if category != "fog":
-        draw.ellipse([(x + 2, cloud_top), (x + 12, cloud_top + 8)], fill=CLOUD_COLOR)
-        draw.ellipse([(x, cloud_top + 3), (x + 8, cloud_top + 9)], fill=CLOUD_COLOR)
+        draw.ellipse([(x + sc(2), cloud_top), (x + sc(12), cloud_top + sc(8))], fill=CLOUD_COLOR)
+        draw.ellipse([(x, cloud_top + sc(3)), (x + sc(8), cloud_top + sc(9))], fill=CLOUD_COLOR)
 
     if category == "cloudy":
         return
     if category == "fog":
-        for line_y in (y + 3, y + 7, y + 11):
-            draw.line([(x, line_y), (x + 14, line_y)], fill=FOG_COLOR, width=2)
+        for line_y in (y + sc(3), y + sc(7), y + sc(11)):
+            draw.line([(x, line_y), (x + size, line_y)], fill=FOG_COLOR, width=sc(2))
         return
     if category == "rain":
-        for dx in (2, 6, 10):
-            draw.line([(x + dx, y + 9), (x + dx - 1, y + 13)], fill=RAIN_COLOR, width=1)
+        for dx in (sc(2), sc(6), sc(10)):
+            draw.line([(x + dx, y + sc(9)), (x + dx - sc(1), y + sc(13))], fill=RAIN_COLOR, width=sc(1))
         return
     if category == "snow":
-        for dx in (2, 6, 10):
-            draw.rectangle([(x + dx, y + 10), (x + dx + 1, y + 11)], fill=SNOW_COLOR)
+        dot = sc(1)
+        for dx in (sc(2), sc(6), sc(10)):
+            draw.rectangle([(x + dx, y + sc(10)), (x + dx + dot, y + sc(11))], fill=SNOW_COLOR)
         return
     if category == "storm":
-        draw.polygon([(x + 8, y + 8), (x + 4, y + 12), (x + 7, y + 12), (x + 5, y + 16)], fill=BOLT_COLOR)
+        # Tip capped at sc(14) (not the original sc(16)) so the bolt stays
+        # within the nominal size x size box instead of overshooting it.
+        draw.polygon(
+            [(x + sc(8), y + sc(6)), (x + sc(4), y + sc(10)), (x + sc(7), y + sc(10)), (x + sc(5), y + sc(14))],
+            fill=BOLT_COLOR,
+        )
         return
 
 
@@ -616,8 +631,20 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         temp_text = None
         icon_category = None
 
-    # Date/time is back to being just its own simple row — weather moved to
-    # float above the walking mascot instead (see the per-frame loop below).
+    # Date/time row — temperature appended back onto the same line (icon
+    # stays out of it, floating above the mascot instead — see below).
+    # Width-checked with our own font metrics rather than assumed, so an
+    # unusually long reading (e.g. a negative double-digit temp) falls back
+    # to date-only instead of clipping off the right edge.
+    if weather_available:
+        combined_text = f"{datetime_text} · {temp_text}"
+        if 6 + _pixel_text_width(combined_text, SMALL_SCALE) <= 234:
+            date_line_text = combined_text
+        else:
+            date_line_text = datetime_text
+    else:
+        date_line_text = datetime_text
+
     weather_box_y = 6 + TITLE_H + 16  # extra room for the bigger corner capybara
     text_row_y = weather_box_y
     content_top_y = weather_box_y + SMALL_H + 6
@@ -627,16 +654,15 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     week_label_y = cur_bar_y + BAR_HEIGHT + 3
     week_bar_y = week_label_y + LABEL_H + 2
 
-    # The floating weather icon tracks the walking mascot's x position every
-    # frame, but its y is constant — the mascot's head height above
-    # walk_baseline never changes, only where it is left-to-right. Mirrors
-    # the body_y formula inside _draw_walking_mascot.
+    # The floating weather icon (bigger than the inline date-row size) tracks
+    # the walking mascot's x position every frame, but its y is constant —
+    # the mascot's head height above walk_baseline never changes, only where
+    # it is left-to-right. Mirrors the body_y formula inside
+    # _draw_walking_mascot.
+    FLOAT_ICON_SIZE = 24  # +71% vs the base 14px icon — the old inline size read as invisible above the mascot
     mascot_head_top = walk_baseline - max(2, int(36 * WALK_SCALE)) - int(16 * WALK_SCALE)
-    FLOAT_GAP = 3
-    float_icon_y = mascot_head_top - WEATHER_ICON_SIZE - FLOAT_GAP
-    float_temp_gap = 3
-    temp_width = _pixel_text_width(temp_text, SMALL_SCALE) if weather_available else 0
-    float_cluster_width = WEATHER_ICON_SIZE + float_temp_gap + temp_width
+    FLOAT_GAP = 4
+    float_icon_y = mascot_head_top - FLOAT_ICON_SIZE - FLOAT_GAP
 
     frames = []
     for i in range(N_FRAMES):
@@ -648,8 +674,8 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         _draw_pixel_text(draw, 32, 6, "CLAUDE", TITLE_SCALE, TEXT_COLOR)
         _draw_capybara(draw, CAPY_X, CAPY_BASELINE, scale=CAPY_SCALE)
 
-        # Local date/time — just its own row now, no weather squeezed in
-        _draw_pixel_text(draw, 6, text_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+        # Local date/time, with temperature appended when it fits
+        _draw_pixel_text(draw, 6, text_row_y, date_line_text, SMALL_SCALE, DIM_TEXT_COLOR)
 
         # Current bar — reset countdown sits beside it (not its own row
         # anymore) to keep the section compact
@@ -670,11 +696,11 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         blinking = (i % 15) in (0, 1)
         _draw_walking_mascot(draw, walk_x, walk_baseline, leg_forward, blinking, scale=WALK_SCALE)
 
-        # Weather icon floats above the mascot's head and tracks it left-right
+        # Weather icon (no temperature — that's back on the date line) floats
+        # above the mascot's head and tracks it left-right
         if weather_available:
-            fx = walk_x - float_cluster_width // 2
-            _draw_weather_icon(draw, fx, float_icon_y, icon_category)
-            _draw_pixel_text(draw, fx + WEATHER_ICON_SIZE + float_temp_gap, float_icon_y, temp_text, SMALL_SCALE, TEXT_COLOR)
+            fx = walk_x - FLOAT_ICON_SIZE // 2
+            _draw_weather_icon(draw, fx, float_icon_y, icon_category, size=FLOAT_ICON_SIZE)
 
         frames.append(img)
 
