@@ -33,6 +33,8 @@ LATEST_STATE_FILE = Path.home() / ".claude-monitor" / "statusline" / "latest.jso
 STALE_AFTER_HOURS = 2  # warn (not error) if Claude Code hasn't refreshed the file in this long
 LOG_DIR = SCRIPT_DIR / "logs"
 STATE_FILE = SCRIPT_DIR / "token_state.json"
+WEATHER_STATE_FILE = SCRIPT_DIR / "weather_state.json"
+WEATHER_CACHE_MINUTES = 45  # both ipapi.co and open-meteo are free/rate-limited; no need to hit either every 1-minute run
 IMAGE_FILE = SCRIPT_DIR / "claude-meter.gif"
 
 LOG_DIR.mkdir(exist_ok=True)
@@ -49,6 +51,16 @@ WEEKLY_BAR_COLOR = (196, 224, 90)
 TRACK_COLOR = (58, 48, 78)
 TEXT_COLOR = (220, 220, 220)
 DIM_TEXT_COLOR = (150, 150, 160)
+CARROT_COLOR = (255, 140, 0)
+LEAF_COLOR = (76, 175, 80)
+SUN_COLOR = (255, 205, 60)
+CLOUD_COLOR = (185, 185, 200)
+RAIN_COLOR = (100, 150, 230)
+SNOW_COLOR = (235, 235, 245)
+BOLT_COLOR = (255, 220, 80)
+FOG_COLOR = (150, 150, 165)
+
+WALK_SCALE = 1.3  # +30% bigger than the original walking mascot (scale 1.0)
 
 
 def log_message(msg: str):
@@ -81,6 +93,117 @@ def save_state(state):
     """Save usage state to JSON"""
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
+
+
+def load_weather_state():
+    """Load last-known location + weather from JSON (cache + offline fallback)"""
+    if WEATHER_STATE_FILE.exists():
+        try:
+            with open(WEATHER_STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_weather_state(state):
+    with open(WEATHER_STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def _weather_icon_category(code: int) -> str:
+    """Map an Open-Meteo WMO weather_code to one of our hand-drawn icon buckets."""
+    if code in (0, 1):
+        return "clear"
+    if code in (2, 3):
+        return "cloudy"
+    if code in (45, 48):
+        return "fog"
+    if 51 <= code <= 67:
+        return "rain"
+    if 71 <= code <= 77:
+        return "snow"
+    if 80 <= code <= 99:
+        return "storm"
+    return "cloudy"
+
+
+def get_location(cache: dict):
+    """
+    IP-based geolocation (ipapi.co — free, no API key) so the display shows
+    wherever this script is actually running, instead of a hardcoded city.
+    Falls back to the last cached lat/lon/city on any failure (offline,
+    rate-limited, etc.) rather than erroring.
+    """
+    try:
+        resp = requests.get("https://ipapi.co/json/", timeout=5)
+        data = resp.json()
+        lat, lon, city = data["latitude"], data["longitude"], data.get("city", "-")
+        log_message(f"IP geolocation: {city} ({lat}, {lon})")
+        return lat, lon, city
+    except Exception as e:
+        log_message(f"IP geolocation failed: {e} — using last cached location")
+        if "lat" in cache and "lon" in cache:
+            return cache["lat"], cache["lon"], cache.get("city", "-")
+        log_message("No cached location available yet")
+        return None, None, None
+
+
+def get_weather():
+    """
+    Current temperature + condition from Open-Meteo (free, no API key).
+    Cached for WEATHER_CACHE_MINUTES in WEATHER_STATE_FILE — this and the IP
+    geolocation lookup both stay skipped while the cache is fresh, since the
+    script already runs every 1 minute and weather doesn't change that fast.
+
+    Never raises on failure (no internet, API down, no location yet) — falls
+    back to the last cached weather, or None if nothing has ever been cached.
+    """
+    cache = load_weather_state()
+    cached_at = cache.get("cached_at")
+    if cached_at is not None:
+        age_minutes = (datetime.now().timestamp() - cached_at) / 60
+        if age_minutes < WEATHER_CACHE_MINUTES and "temp_c" in cache:
+            log_message(
+                f"Weather cache hit ({age_minutes:.0f}m old): {cache.get('city')} {cache['temp_c']}°C"
+            )
+            return cache
+
+    lat, lon, city = get_location(cache)
+    if lat is None:
+        if "temp_c" in cache:
+            log_message("Using stale cached weather (no location available)")
+            return cache
+        return None
+
+    try:
+        url = (
+            "https://api.open-meteo.com/v1/forecast"
+            f"?latitude={lat}&longitude={lon}&current=temperature_2m,cloud_cover,weather_code"
+        )
+        resp = requests.get(url, timeout=5)
+        current = resp.json()["current"]
+        temp_c = round(current["temperature_2m"])
+        code = int(current["weather_code"])
+        icon = _weather_icon_category(code)
+
+        state = {
+            "lat": lat,
+            "lon": lon,
+            "city": city,
+            "temp_c": temp_c,
+            "weather_code": code,
+            "icon": icon,
+            "cached_at": datetime.now().timestamp(),
+        }
+        save_weather_state(state)
+        log_message(f"Weather: {city} {temp_c}°C, code {code} ({icon})")
+        return state
+    except Exception as e:
+        log_message(f"Weather fetch failed: {e} — using last cached weather")
+        if "temp_c" in cache:
+            return cache
+        return None
 
 
 def _format_countdown(reset_value, now: datetime, day_format: bool) -> str:
@@ -203,6 +326,8 @@ PIXEL_FONT = {
     "W": ["10001", "10001", "10001", "10101", "10101", "11011", "10001"],
     "Y": ["10001", "10001", "01010", "00100", "00100", "00100", "00100"],
     ":": ["00000", "00100", "00100", "00000", "00100", "00100", "00000"],
+    "°": ["01100", "10010", "10010", "01100", "00000", "00000", "00000"],
+    "-": ["00000", "00000", "00000", "11111", "00000", "00000", "00000"],
     "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
     "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
     "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
@@ -298,6 +423,27 @@ def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
             [(body_x + body_w - eye_inset - eye_size, eye_y), (body_x + body_w - eye_inset, eye_y + eye_size)], fill=BG_COLOR
         )
 
+    # Carrot party hat — orange cone sitting on the head (base dips slightly
+    # into the body for a "worn" look) with a 3-leaf green tuft at the tip.
+    hat_w = max(2, int(22 * scale))
+    hat_h = max(1, int(10 * scale))
+    hat_base_y = body_y + max(1, int(4 * scale))
+    hat_tip_y = hat_base_y - hat_h
+    draw.polygon(
+        [(x - hat_w // 2, hat_base_y), (x + hat_w // 2, hat_base_y), (x, hat_tip_y)],
+        fill=CARROT_COLOR,
+    )
+    leaf_size = max(1, int(6 * scale))
+    draw.polygon(
+        [(x, hat_tip_y), (x - leaf_size, hat_tip_y - leaf_size), (x - leaf_size // 2, hat_tip_y)], fill=LEAF_COLOR
+    )
+    draw.polygon(
+        [(x - 1, hat_tip_y), (x, hat_tip_y - leaf_size - 1), (x + 1, hat_tip_y)], fill=LEAF_COLOR
+    )
+    draw.polygon(
+        [(x, hat_tip_y), (x + leaf_size, hat_tip_y - leaf_size), (x + leaf_size // 2, hat_tip_y)], fill=LEAF_COLOR
+    )
+
 
 def _draw_capybara(draw, x, y_baseline, scale=1.0):
     """
@@ -351,18 +497,60 @@ def _draw_capybara(draw, x, y_baseline, scale=1.0):
     )
 
 
+WEATHER_ICON_SIZE = 14  # square box, drawn at (x, y) top-left, matches the SMALL_SCALE text row height
+
+
+def _draw_weather_icon(draw, x, y, category):
+    """
+    Small hand-drawn weather icon (14x14) — no emoji/TTF, matching this
+    project's no-external-assets rule. `category` is one of the buckets
+    from _weather_icon_category().
+    """
+    if category == "clear":
+        cx, cy, r = x + 7, y + 7, 4
+        draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=SUN_COLOR)
+        for dx, dy in ((0, -6), (0, 6), (-6, 0), (6, 0)):
+            draw.line([(cx, cy), (cx + dx, cy + dy)], fill=SUN_COLOR, width=1)
+        return
+
+    # Every other category starts from the same cloud blob
+    cloud_top = y + 2 if category in ("cloudy", "fog") else y
+    if category != "fog":
+        draw.ellipse([(x + 2, cloud_top), (x + 12, cloud_top + 8)], fill=CLOUD_COLOR)
+        draw.ellipse([(x, cloud_top + 3), (x + 8, cloud_top + 9)], fill=CLOUD_COLOR)
+
+    if category == "cloudy":
+        return
+    if category == "fog":
+        for line_y in (y + 3, y + 7, y + 11):
+            draw.line([(x, line_y), (x + 14, line_y)], fill=FOG_COLOR, width=2)
+        return
+    if category == "rain":
+        for dx in (2, 6, 10):
+            draw.line([(x + dx, y + 9), (x + dx - 1, y + 13)], fill=RAIN_COLOR, width=1)
+        return
+    if category == "snow":
+        for dx in (2, 6, 10):
+            draw.rectangle([(x + dx, y + 10), (x + dx + 1, y + 11)], fill=SNOW_COLOR)
+        return
+    if category == "storm":
+        draw.polygon([(x + 8, y + 8), (x + 4, y + 12), (x + 7, y + 12), (x + 5, y + 16)], fill=BOLT_COLOR)
+        return
+
+
 TITLE_SCALE = 4
 LABEL_SCALE = 3
 SMALL_SCALE = 2
 
 
-def draw_meter_image(state: dict) -> Path:
+def draw_meter_image(state: dict, weather: dict = None) -> Path:
     """
     Draw an animated 240x240 GIF: dark background, static mascot icon + "CLAUDE"
     title (hand-drawn pixel font, no TTF/download), a small static capybara in
-    the top-right corner, Current (orange) + Weekly (lime) bars on a purple
-    track, reset countdowns, and a bigger mascot walking left-right (triangle
-    wave) along the bottom with alternating legs and periodic blinking.
+    the top-right corner, local date/time + weather, Current (orange) + Weekly
+    (lime) bars on a purple track with inline reset countdowns, and a bigger
+    mascot (carrot party hat included) walking left-right (triangle wave)
+    along the bottom with alternating legs and periodic blinking.
     """
     current_percent = state.get("current_percent", 0.0)
     current_reset = state.get("current_reset", "-")
@@ -371,15 +559,55 @@ def draw_meter_image(state: dict) -> Path:
 
     walk_left, walk_right = 40, 200
     walk_baseline = 236
+    BAR_WIDTH = 150  # narrower than the old full-width (228) bar — frees room
+    # beside it for the reset countdown, which used to need its own text row.
+    # That saved row is what pays for WALK_SCALE (1.3x) plus the carrot hat
+    # below without overflowing the 240px canvas — see README/commit notes.
+    BAR_HEIGHT = 16
+    RIGHT_MARGIN = 6
 
     # Live clock — system local time (no timezone dependency), so a clone of
     # this repo shows the right time on whatever machine runs it. Same text
     # baked into every frame (the GIF loops fast; it isn't meant to animate
-    # within one generated image). Dropped the weekday and "·" separator —
-    # "Sun 26 Jul · 14:32" measures ~216px at this font/scale and overflows
-    # the 240px canvas starting from x=52; "26 Jul 14:32" fits comfortably.
+    # within one generated image).
     now_local = datetime.now()
     datetime_text = now_local.strftime("%d %b %H:%M")
+
+    weather_available = bool(weather and "temp_c" in weather)
+    if weather_available:
+        temp_text = f"{weather['temp_c']}°C"
+        icon_category = weather["icon"]
+    else:
+        temp_text = None
+        icon_category = None
+
+    # Decide 1-line vs 2-line layout for date+weather up front (same for
+    # every frame) — measure actual pixel width with our own font metrics,
+    # the hand-drawn-font equivalent of a textbbox check.
+    date_row_y = 37
+    date_width = _pixel_text_width(datetime_text, SMALL_SCALE)
+    icon_gap, temp_gap = 4, 3
+    if weather_available:
+        temp_width = _pixel_text_width(temp_text, SMALL_SCALE)
+        one_line_width = date_width + icon_gap + WEATHER_ICON_SIZE + temp_gap + temp_width
+        one_line_fits = (6 + one_line_width) <= (240 - RIGHT_MARGIN)
+    else:
+        one_line_fits = True
+
+    if weather_available and one_line_fits:
+        weather_row_y = date_row_y
+        content_top_y = date_row_y + 14 + 3
+    elif weather_available:
+        weather_row_y = date_row_y + 14 + 2
+        content_top_y = weather_row_y + 14 + 3
+    else:
+        weather_row_y = None
+        content_top_y = date_row_y + 14 + 3
+
+    cur_label_y = content_top_y
+    cur_bar_y = cur_label_y + 21 + 3
+    week_label_y = cur_bar_y + BAR_HEIGHT + 4
+    week_bar_y = week_label_y + 21 + 3
 
     frames = []
     for i in range(N_FRAMES):
@@ -387,24 +615,36 @@ def draw_meter_image(state: dict) -> Path:
         draw = ImageDraw.Draw(img)
 
         # Title row: static (non-walking) mini mascot icon + "CLAUDE" + corner capybara
-        _draw_walking_mascot(draw, 16, 34, leg_forward=False, blinking=False, scale=0.55)
+        _draw_walking_mascot(draw, 16, 37, leg_forward=False, blinking=False, scale=0.55)
         _draw_pixel_text(draw, 32, 6, "CLAUDE", TITLE_SCALE, TEXT_COLOR)
         _draw_capybara(draw, 220, 34, scale=0.5)
 
-        # Thai local date/time, right under the title
-        _draw_pixel_text(draw, 52, 38, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+        # Local date/time, optionally with weather icon + temp inline (or on
+        # its own second small line if it doesn't fit next to the date)
+        if weather_available and one_line_fits:
+            cx = 6
+            cx += _draw_pixel_text(draw, cx, date_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+            cx += icon_gap
+            _draw_weather_icon(draw, cx, date_row_y, icon_category)
+            cx += WEATHER_ICON_SIZE + temp_gap
+            _draw_pixel_text(draw, cx, date_row_y, temp_text, SMALL_SCALE, TEXT_COLOR)
+        elif weather_available:
+            _draw_pixel_text(draw, 6, date_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+            _draw_weather_icon(draw, 6, weather_row_y, icon_category)
+            _draw_pixel_text(draw, 6 + WEATHER_ICON_SIZE + temp_gap, weather_row_y, temp_text, SMALL_SCALE, TEXT_COLOR)
+        else:
+            _draw_pixel_text(draw, 6, date_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
 
-        # Current bar (shifted down 19px from its original position to make
-        # room for the date/time row above; bar height trimmed 18->16 to
-        # keep clearance above the walking mascot at the bottom)
-        _draw_pixel_text(draw, 6, 55, f"CURRENT {current_percent:.0f}%", LABEL_SCALE, TEXT_COLOR)
-        _draw_bar(draw, 6, 79, 228, 16, current_percent, CURRENT_BAR_COLOR)
-        _draw_pixel_text(draw, 6, 98, f"RESET {current_reset}", SMALL_SCALE, DIM_TEXT_COLOR)
+        # Current bar — reset countdown sits beside it (not its own row
+        # anymore) to keep the section compact
+        _draw_pixel_text(draw, 6, cur_label_y, f"CURRENT {current_percent:.0f}%", LABEL_SCALE, TEXT_COLOR)
+        _draw_bar(draw, 6, cur_bar_y, BAR_WIDTH, BAR_HEIGHT, current_percent, CURRENT_BAR_COLOR)
+        _draw_pixel_text(draw, 6 + BAR_WIDTH + 4, cur_bar_y + 1, current_reset, SMALL_SCALE, DIM_TEXT_COLOR)
 
         # Weekly bar — real official % (7-day rate_limits window)
-        _draw_pixel_text(draw, 6, 116, f"WEEKLY {weekly_percent:.0f}%", LABEL_SCALE, TEXT_COLOR)
-        _draw_bar(draw, 6, 140, 228, 16, weekly_percent, WEEKLY_BAR_COLOR)
-        _draw_pixel_text(draw, 6, 159, f"RESET {weekly_reset}", SMALL_SCALE, DIM_TEXT_COLOR)
+        _draw_pixel_text(draw, 6, week_label_y, f"WEEKLY {weekly_percent:.0f}%", LABEL_SCALE, TEXT_COLOR)
+        _draw_bar(draw, 6, week_bar_y, BAR_WIDTH, BAR_HEIGHT, weekly_percent, WEEKLY_BAR_COLOR)
+        _draw_pixel_text(draw, 6 + BAR_WIDTH + 4, week_bar_y + 1, weekly_reset, SMALL_SCALE, DIM_TEXT_COLOR)
 
         # Walking mascot: triangle wave position across the N_FRAMES loop
         t = i / (N_FRAMES - 1)
@@ -412,7 +652,7 @@ def draw_meter_image(state: dict) -> Path:
         walk_x = int(walk_left + triangle * (walk_right - walk_left))
         leg_forward = (i % 8) < 4
         blinking = (i % 15) in (0, 1)
-        _draw_walking_mascot(draw, walk_x, walk_baseline, leg_forward, blinking)
+        _draw_walking_mascot(draw, walk_x, walk_baseline, leg_forward, blinking, scale=WALK_SCALE)
 
         frames.append(img)
 
@@ -504,7 +744,8 @@ def main():
     log_message(f"Image path: {IMAGE_FILE}")
 
     state = get_token_usage()
-    draw_meter_image(state)
+    weather = get_weather()
+    draw_meter_image(state, weather)
 
     if upload_to_giftv(IMAGE_FILE):
         set_theme_on_giftv(3)

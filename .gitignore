@@ -5,6 +5,7 @@
 # --- Personal usage/state data (regenerated at runtime) ---
 official_state.json
 token_state.json
+weather_state.json
 logs/
 *.log
 

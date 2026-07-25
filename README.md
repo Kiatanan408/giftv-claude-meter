@@ -132,6 +132,7 @@ giftv-claude-meter/
 ├── .env                    # GIFTV_IP + endpoints (NEVER commit — see .gitignore)
 ├── official_state.json     # latest official rate_limits snapshot (written by the hook)
 ├── token_state.json        # fallback cache if official data goes stale
+├── weather_state.json      # cached IP-geolocated location + weather (45 min TTL, offline fallback)
 ├── claude-meter.gif        # last-generated frame set (regenerated every run)
 ├── requirements.txt
 ├── setup-task.ps1          # registers the Windows Task Scheduler job
@@ -164,18 +165,35 @@ or the device screen on boot.
 Clock/date on the display uses your system's local timezone automatically —
 no configuration needed.
 
+Weather on the display is auto-detected from your IP address (via
+[ipapi.co](https://ipapi.co) for location, then
+[Open-Meteo](https://open-meteo.com) for the forecast) — no config, no API
+key, no hardcoded city. It's cached for 45 minutes so a clone of this repo
+doesn't hammer either free service on every 1-minute run, and if either
+lookup fails (offline, rate-limited) it silently falls back to the last
+cached reading instead of erroring or blanking the display.
+
 ## What's on screen
 
-- **Header:** small mini mascot icon + "CLAUDE" title (hand-drawn pixel font)
+- **Header:** small mini mascot icon (carrot hat included) + "CLAUDE" title
+  (hand-drawn pixel font)
 - **Top-right:** a small static capybara, sitting still
-- **Current (5h) bar** — orange, official %, reset countdown
-- **Weekly (7d) bar** — lime, official %, reset countdown
-- **Bottom strip:** a bigger version of the mascot walking back and forth,
-  blinking occasionally, alternating legs mid-step
+- **Date/time row:** local date + time, with a small weather icon + °C
+  inline when a reading is available (falls back to its own second line if
+  the combined text would run off the edge)
+- **Current (5h) bar** — orange, official %, reset countdown shown beside
+  the bar
+- **Weekly (7d) bar** — lime, official %, reset countdown shown beside the
+  bar
+- **Bottom strip:** a bigger version of the mascot (also wearing its carrot
+  hat) walking back and forth, blinking occasionally, alternating legs
+  mid-step
 
 All hand-drawn with `Pillow` — no external image assets, no downloaded
-fonts, just rectangles and a triangle-wave walk cycle. Even the title font
-is a hand-drawn 5×7 pixel bitmap font.
+fonts, no emoji glyphs, just rectangles/ellipses/polygons and a
+triangle-wave walk cycle. Even the title font and weather icons are
+hand-drawn from scratch (a 5×7 pixel bitmap font, and ~14px icon shapes for
+sun/cloud/fog/rain/snow/storm).
 
 ---
 
@@ -191,6 +209,11 @@ is a hand-drawn 5×7 pixel bitmap font.
 - The device's `/doUpload` response is malformed per RFC 7230; any HTTP
   client doing strict parsing needs the ignore-and-verify workaround
   above.
+- `ipapi.co`'s free tier is IP-based rate limiting shared across everyone
+  on the same network/ISP — on a busy connection it can return `429` even
+  on your very first request. The script handles this (falls back to
+  cached location, then skips weather entirely if there's no cache yet)
+  but it means weather may not appear until the rate limit clears.
 
 ## Credits
 
