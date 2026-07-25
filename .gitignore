@@ -1,0 +1,33 @@
+# --- Secrets: never commit these ---
+.env
+*.env
+
+# --- Personal usage/state data (regenerated at runtime) ---
+official_state.json
+token_state.json
+logs/
+*.log
+
+# --- Generated output (regenerated every run, no need to track) ---
+claude-meter.gif
+*.pyc
+__pycache__/
+
+# --- Old iteration debug/preview artifacts (not part of the shipped script) ---
+claude-mascot.gif
+claude-meter.jpg
+claude-meter.png
+claude-usage-card.gif
+claude-usage-dark.gif
+claude-usage-final.gif
+claude-usage-walk.gif
+mascot-preview.png
+usage-dark-preview.png
+usage-final-preview.png
+walk-strip-preview.png
+payload.json
+
+# --- OS/editor cruft ---
+.DS_Store
+Thumbs.db
+.vscode/
