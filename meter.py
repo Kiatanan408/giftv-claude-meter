@@ -24,11 +24,12 @@ GIFTV_UPLOAD_URL = os.getenv("GIFTV_UPLOAD_URL", f"http://{GIFTV_IP}/doUpload?di
 SCRIPT_DIR = Path(__file__).parent
 
 # Official data source: claude-monitor's --statusline hook (wired into
-# ~/.claude/settings.json) captures Anthropic's real rate_limits every time
-# Claude Code renders its status bar, and `claude-monitor --once --write-state`
-# merges it into this file. No local token-count guessing anymore (25 ก.ค. 69).
-# Derived from SCRIPT_DIR (not hardcoded) so this keeps working if the folder is ever renamed/moved.
-OFFICIAL_STATE_FILE = SCRIPT_DIR / "official_state.json"
+# ~/.claude/settings.json) writes real Anthropic rate_limits straight to this
+# file every time Claude Code renders its status bar. Read directly instead of
+# official_state.json (26 ก.ค. 69) — that file only updates when someone runs
+# `claude-monitor --once --write-state` by hand, which nothing scheduled, so it
+# went stale for hours while this file kept updating live.
+LATEST_STATE_FILE = Path.home() / ".claude-monitor" / "statusline" / "latest.json"
 STALE_AFTER_HOURS = 2  # warn (not error) if Claude Code hasn't refreshed the file in this long
 LOG_DIR = SCRIPT_DIR / "logs"
 STATE_FILE = SCRIPT_DIR / "token_state.json"
@@ -82,11 +83,15 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 
-def _format_countdown(reset_iso: str, now: datetime, day_format: bool) -> str:
-    """Format an ISO reset timestamp as 'Xh Ym' (day_format=False) or 'Xd Yh' (True)."""
-    reset_dt = datetime.fromisoformat(reset_iso)
-    if reset_dt.tzinfo is None:
-        reset_dt = reset_dt.replace(tzinfo=timezone.utc)
+def _format_countdown(reset_value, now: datetime, day_format: bool) -> str:
+    """Format a reset timestamp (epoch int/float, or ISO string) as 'Xh Ym'
+    (day_format=False) or 'Xd Yh' (True)."""
+    if isinstance(reset_value, (int, float)):
+        reset_dt = datetime.fromtimestamp(reset_value, tz=timezone.utc)
+    else:
+        reset_dt = datetime.fromisoformat(reset_value)
+        if reset_dt.tzinfo is None:
+            reset_dt = reset_dt.replace(tzinfo=timezone.utc)
     delta = reset_dt - now
     total_minutes = max(int(delta.total_seconds() // 60), 0)
     if day_format:
@@ -100,10 +105,11 @@ def _format_countdown(reset_iso: str, now: datetime, day_format: bool) -> str:
 def get_token_usage():
     """
     Real usage % straight from Anthropic's official rate_limits — no local
-    token-count guessing. A claude-monitor --statusline hook (wired into
-    ~/.claude/settings.json) captures the real payload every time Claude
-    Code renders its status bar; `claude-monitor --once --write-state`
-    merges it into OFFICIAL_STATE_FILE. This function just reads that file.
+    token-count guessing. The claude-monitor --statusline hook (wired into
+    ~/.claude/settings.json) writes the real payload to LATEST_STATE_FILE
+    every time Claude Code renders its status bar. This function reads that
+    file directly, so it's only ever as stale as the last time Claude Code
+    itself was used.
 
     NOTE: there is no official per-model (e.g. Fable-only) weekly % — the
     rate_limits payload Anthropic sends only ever carries aggregate
@@ -121,27 +127,21 @@ def get_token_usage():
     weekly_reset, last_update
     """
     try:
-        if not OFFICIAL_STATE_FILE.exists():
-            raise FileNotFoundError(f"{OFFICIAL_STATE_FILE} does not exist yet")
+        if not LATEST_STATE_FILE.exists():
+            raise FileNotFoundError(f"{LATEST_STATE_FILE} does not exist yet")
 
         age_hours = (
-            datetime.now().timestamp() - OFFICIAL_STATE_FILE.stat().st_mtime
+            datetime.now().timestamp() - LATEST_STATE_FILE.stat().st_mtime
         ) / 3600
         if age_hours > STALE_AFTER_HOURS:
-            log_message(f"WARNING: official_state.json is stale data ({age_hours:.1f}h old)")
+            log_message(f"WARNING: latest.json is stale data ({age_hours:.1f}h old)")
 
-        with open(OFFICIAL_STATE_FILE, "r", encoding="utf-8") as f:
+        with open(LATEST_STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        limits = data["limits"]
-        five_hour = limits["five_hour"]
-        seven_day = limits["seven_day"]
-        if five_hour.get("confidence") != "official" or seven_day.get("confidence") != "official":
-            raise ValueError(
-                f"limits not confidence=official (got five_hour={five_hour.get('confidence')}, "
-                f"seven_day={seven_day.get('confidence')}) — Claude Code hasn't sent real "
-                f"rate_limits yet (free tier, or statusline hasn't fired)"
-            )
+        rate_limits = data["rate_limits"]
+        five_hour = rate_limits["five_hour"]
+        seven_day = rate_limits["seven_day"]
 
         now = datetime.now(timezone.utc)
         current_percent = float(five_hour["used_percentage"])
@@ -165,7 +165,7 @@ def get_token_usage():
         return state
 
     except Exception as e:
-        log_message(f"Error reading official_state.json: {e} — using last known state")
+        log_message(f"Error reading latest.json: {e} — using last known state")
         state = load_state()
         log_message(
             f"Last known: session {state.get('current_percent', 0):.1f}%, "
