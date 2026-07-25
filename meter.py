@@ -35,6 +35,8 @@ LOG_DIR = SCRIPT_DIR / "logs"
 STATE_FILE = SCRIPT_DIR / "token_state.json"
 WEATHER_STATE_FILE = SCRIPT_DIR / "weather_state.json"
 WEATHER_CACHE_MINUTES = 45  # both ipapi.co and open-meteo are free/rate-limited; no need to hit either every 1-minute run
+WEATHER_RETRY_MINUTES = 10  # backoff on *failed* lookups too — without this, a down/rate-limited API gets hit
+# every single 1-minute run forever, which is what keeps a free-tier rate limit from ever clearing
 IMAGE_FILE = SCRIPT_DIR / "claude-meter.gif"
 
 LOG_DIR.mkdir(exist_ok=True)
@@ -158,6 +160,11 @@ def get_weather():
 
     Never raises on failure (no internet, API down, no location yet) — falls
     back to the last cached weather, or None if nothing has ever been cached.
+
+    Backs off on failed attempts too (WEATHER_RETRY_MINUTES), not just
+    successful ones — otherwise a down/rate-limited API gets re-hit on
+    every single 1-minute run, which is self-defeating against a free-tier
+    rate limit.
     """
     cache = load_weather_state()
     cached_at = cache.get("cached_at")
@@ -168,6 +175,19 @@ def get_weather():
                 f"Weather cache hit ({age_minutes:.0f}m old): {cache.get('city')} {cache['temp_c']}°C"
             )
             return cache
+
+    last_attempt = cache.get("last_attempt")
+    if last_attempt is not None:
+        attempt_age_minutes = (datetime.now().timestamp() - last_attempt) / 60
+        if attempt_age_minutes < WEATHER_RETRY_MINUTES:
+            log_message(
+                f"Skipping weather retry ({attempt_age_minutes:.0f}m since last attempt, "
+                f"backing off {WEATHER_RETRY_MINUTES}m)"
+            )
+            return cache if "temp_c" in cache else None
+
+    cache["last_attempt"] = datetime.now().timestamp()
+    save_weather_state(cache)
 
     lat, lon, city = get_location(cache)
     if lat is None:
