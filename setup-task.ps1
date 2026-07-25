@@ -6,7 +6,7 @@
 $TaskName = "Claude-Token-Meter"
 $ScriptPath = "C:\Users\Kiata\OneDrive\Desktop\giftv-claude-meter\meter.py"
 $WorkingDir = "C:\Users\Kiata\OneDrive\Desktop\giftv-claude-meter"
-$PythonExe = "C:\Users\Kiata\AppData\Local\Programs\Python\Python313\python.exe"  # Full path — Task Scheduler doesn't reliably see user-shell PATH (the WindowsApps python.exe alias stub can shadow it and fail silently)
+$PythonExe = "C:\Users\Kiata\AppData\Local\Programs\Python\Python313\pythonw.exe"  # Windowless build — python.exe flashes a console window every run; pythonw.exe suppresses it. Full path since Task Scheduler doesn't reliably see user-shell PATH (the WindowsApps python.exe alias stub can shadow it and fail silently)
 
 # Check if task already exists
 $TaskExists = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
