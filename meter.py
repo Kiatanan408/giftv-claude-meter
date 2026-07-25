@@ -60,10 +60,13 @@ CARROT_COLOR = (255, 140, 0)
 LEAF_COLOR = (76, 175, 80)
 SUN_COLOR = (255, 205, 60)
 CLOUD_COLOR = (185, 185, 200)
+CLOUD_SHADOW_COLOR = (140, 140, 158)
 RAIN_COLOR = (100, 150, 230)
 SNOW_COLOR = (235, 235, 245)
 BOLT_COLOR = (255, 220, 80)
 FOG_COLOR = (150, 150, 165)
+MOON_COLOR = (225, 225, 240)
+STAR_COLOR = (255, 250, 210)
 
 WALK_SCALE = 1.05  # dialed back down from 1.3 — combined with the floating weather icon above it, that felt cluttered
 
@@ -528,59 +531,150 @@ def _draw_capybara(draw, x, y_baseline, scale=1.0):
     )
 
 
-WEATHER_ICON_SIZE = 14  # base square icon box — the inline (date-row) size; see FLOAT_ICON_SIZE for the
-# bigger floating-above-mascot version. _draw_weather_icon(size=...) scales every offset proportionally.
+WEATHER_ICON_SIZE = 14  # base square icon box every primitive below is designed against; passing a bigger
+# `size` scales every offset proportionally (see _icon_sc), so the same primitives work at any icon size.
+
+
+def _icon_sc(size):
+    """Returns a scaling closure sc(v) for hand-drawn icon primitives, proportional to WEATHER_ICON_SIZE."""
+    s = size / WEATHER_ICON_SIZE
+    return lambda v: max(1, round(v * s))
+
+
+def draw_sun(draw, x, y, size):
+    """8-ray sun — adapted from the make_weather_set.py reference, scaled way down
+    (that version used r=20-26 for a 240px cell; ours needs to read at 14-24px total)."""
+    sc = _icon_sc(size)
+    r = sc(4)
+    cx, cy = x + sc(7), y + sc(7)
+    ray = sc(6)
+    for ddx, ddy in ((-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)):
+        draw.line([(cx, cy), (cx + ddx * ray, cy + ddy * ray)], fill=SUN_COLOR, width=sc(1))
+    draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=SUN_COLOR)
+
+
+def draw_cloud(draw, x, y, size):
+    """Puffy 3-bump cloud with a soft shadow layer underneath, adapted from the
+    reference's 5-puff-plus-shadow design (compressed to 3 puffs to fit our tiny icon box)."""
+    sc = _icon_sc(size)
+    puffs = [
+        (x + sc(3), y + sc(7), sc(3)),
+        (x + sc(7), y + sc(4), sc(4)),
+        (x + sc(11), y + sc(7), sc(3)),
+    ]
+    shadow_dy = sc(1)
+    for px, py, pr in puffs:
+        draw.ellipse([(px - pr, py - pr + shadow_dy), (px + pr, py + pr + shadow_dy)], fill=CLOUD_SHADOW_COLOR)
+    for px, py, pr in puffs:
+        draw.ellipse([(px - pr, py - pr), (px + pr, py + pr)], fill=CLOUD_COLOR)
+    draw.rectangle([(x + sc(1), y + sc(7)), (x + sc(13), y + sc(11))], fill=CLOUD_COLOR)
+
+
+def draw_moon(draw, x, y, size):
+    """Crescent moon — a filled circle with a background-colored circle offset over it to bite a chunk out."""
+    sc = _icon_sc(size)
+    r = sc(4)
+    cx, cy = x + sc(6), y + sc(6)
+    draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=MOON_COLOR)
+    bite = sc(2)
+    draw.ellipse([(cx - r + bite, cy - r - sc(1)), (cx + r + bite, cy + r - sc(1))], fill=BG_COLOR)
+
+
+def draw_stars(draw, x, y, size):
+    """Small filled dots (not crosses) — matches the reference's plain-circle stars."""
+    sc = _icon_sc(size)
+    r = sc(1)
+    for dx, dy in ((sc(11), sc(1)), (sc(13), sc(6)), (sc(10), sc(11))):
+        px, py = x + dx, y + dy
+        draw.ellipse([(px - r, py - r), (px + r, py + r)], fill=STAR_COLOR)
+
+
+def draw_raindrops(draw, x, y, size):
+    """Zigzag drop start heights, matching the reference's alternating-offset rain."""
+    sc = _icon_sc(size)
+    for i, dx in enumerate((sc(2), sc(6), sc(10))):
+        y0 = y + sc(9) + (sc(2) if i % 2 == 0 else 0)
+        draw.line([(x + dx, y0), (x + dx - sc(1), y0 + sc(4))], fill=RAIN_COLOR, width=sc(1))
+
+
+def draw_snow(draw, x, y, size):
+    """Round flakes with the same zigzag offset as draw_raindrops, per the reference."""
+    sc = _icon_sc(size)
+    r = sc(1)
+    for i, dx in enumerate((sc(2), sc(6), sc(10))):
+        y0 = y + sc(10) + (sc(2) if i % 2 == 0 else 0)
+        draw.ellipse([(x + dx - r, y0 - r), (x + dx + r, y0 + r)], fill=SNOW_COLOR)
+
+
+def draw_bolt(draw, x, y, size):
+    """Zigzag lightning-bolt polygon, adapted from the reference's 7-point bolt shape."""
+    sc = _icon_sc(size)
+    draw.polygon(
+        [
+            (x + sc(7), y + sc(5)),
+            (x + sc(4), y + sc(10)),
+            (x + sc(7), y + sc(10)),
+            (x + sc(5), y + sc(14)),
+            (x + sc(9), y + sc(8)),
+            (x + sc(6), y + sc(8)),
+        ],
+        fill=BOLT_COLOR,
+    )
+
+
+def _resolve_display_icon(code: int, hour: int) -> str:
+    """
+    Maps an Open-Meteo WMO weather_code plus the current hour (0-23) to one
+    of 8 composed icon looks. Day is 6:00-18:00 local time — only clear and
+    partly-cloudy conditions actually change look between day/night (a sun
+    or a moon+stars); rain/snow/fog/storm look the same either way.
+    """
+    is_day = 6 <= hour < 18
+    if code in (0, 1):
+        return "sun" if is_day else "moon_stars"
+    if code in (2, 3):
+        return "sun_cloud" if is_day else "moon_cloud"
+    if code in (45, 48):
+        return "cloud"
+    if 51 <= code <= 67:
+        return "cloud_rain"
+    if 71 <= code <= 77:
+        return "cloud_snow"
+    if 80 <= code <= 99:
+        return "cloud_thunder"
+    return "cloud"
 
 
 def _draw_weather_icon(draw, x, y, category, size=WEATHER_ICON_SIZE):
     """
-    Small hand-drawn weather icon (nominally a `size`x`size` box, base design
-    is 14x14) — no emoji/TTF, matching this project's no-external-assets
-    rule. `category` is one of the buckets from _weather_icon_category().
+    Composes the hand-drawn primitives above into one of the 8 looks from
+    _resolve_display_icon — no emoji/TTF, matching this project's
+    no-external-assets rule.
     """
-    s = size / WEATHER_ICON_SIZE
-
-    def sc(v):
-        return max(1, round(v * s))
-
-    if category == "clear":
-        r = sc(4)
-        cx, cy = x + sc(7), y + sc(7)
-        draw.ellipse([(cx - r, cy - r), (cx + r, cy + r)], fill=SUN_COLOR)
-        ray = sc(6)
-        for dx, dy in ((0, -ray), (0, ray), (-ray, 0), (ray, 0)):
-            draw.line([(cx, cy), (cx + dx, cy + dy)], fill=SUN_COLOR, width=sc(1))
-        return
-
-    # Every other category starts from the same cloud blob
-    cloud_top = y + sc(2) if category in ("cloudy", "fog") else y
-    if category != "fog":
-        draw.ellipse([(x + sc(2), cloud_top), (x + sc(12), cloud_top + sc(8))], fill=CLOUD_COLOR)
-        draw.ellipse([(x, cloud_top + sc(3)), (x + sc(8), cloud_top + sc(9))], fill=CLOUD_COLOR)
-
-    if category == "cloudy":
-        return
-    if category == "fog":
-        for line_y in (y + sc(3), y + sc(7), y + sc(11)):
-            draw.line([(x, line_y), (x + size, line_y)], fill=FOG_COLOR, width=sc(2))
-        return
-    if category == "rain":
-        for dx in (sc(2), sc(6), sc(10)):
-            draw.line([(x + dx, y + sc(9)), (x + dx - sc(1), y + sc(13))], fill=RAIN_COLOR, width=sc(1))
-        return
-    if category == "snow":
-        dot = sc(1)
-        for dx in (sc(2), sc(6), sc(10)):
-            draw.rectangle([(x + dx, y + sc(10)), (x + dx + dot, y + sc(11))], fill=SNOW_COLOR)
-        return
-    if category == "storm":
-        # Tip capped at sc(14) (not the original sc(16)) so the bolt stays
-        # within the nominal size x size box instead of overshooting it.
-        draw.polygon(
-            [(x + sc(8), y + sc(6)), (x + sc(4), y + sc(10)), (x + sc(7), y + sc(10)), (x + sc(5), y + sc(14))],
-            fill=BOLT_COLOR,
-        )
-        return
+    sc = _icon_sc(size)
+    if category == "sun":
+        draw_sun(draw, x, y, size)
+    elif category == "moon_stars":
+        draw_moon(draw, x, y, size)
+        draw_stars(draw, x, y, size)
+    elif category == "sun_cloud":
+        # Sun nudged up-left so it visibly peeks out from behind the cloud
+        draw_sun(draw, x - sc(3), y - sc(2), size)
+        draw_cloud(draw, x, y, size)
+    elif category == "moon_cloud":
+        draw_moon(draw, x - sc(3), y - sc(2), size)
+        draw_cloud(draw, x, y, size)
+    elif category == "cloud":
+        draw_cloud(draw, x, y, size)
+    elif category == "cloud_rain":
+        draw_cloud(draw, x, y, size)
+        draw_raindrops(draw, x, y, size)
+    elif category == "cloud_snow":
+        draw_cloud(draw, x, y, size)
+        draw_snow(draw, x, y, size)
+    elif category == "cloud_thunder":
+        draw_cloud(draw, x, y, size)
+        draw_bolt(draw, x, y, size)
 
 
 TITLE_SCALE = 4
@@ -626,7 +720,8 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     weather_available = bool(weather and "temp_c" in weather)
     if weather_available:
         temp_text = f"{weather['temp_c']}°C"
-        icon_category = weather["icon"]
+        icon_category = _resolve_display_icon(weather["weather_code"], now_local.hour)
+        log_message(f"Weather icon: code {weather['weather_code']}, hour {now_local.hour} -> '{icon_category}'")
     else:
         temp_text = None
         icon_category = None
@@ -664,6 +759,22 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     FLOAT_GAP = 4
     float_icon_y = mascot_head_top - FLOAT_ICON_SIZE - FLOAT_GAP
 
+    # Render the (possibly multi-primitive) icon once onto its own transparent
+    # surface instead of re-invoking 2-3 drawing primitives on every one of
+    # the 40 frames — each frame then just pastes this same bitmap at its
+    # frame's mascot x position, which is far cheaper.
+    #
+    # ICON_MARGIN pads the sprite beyond FLOAT_ICON_SIZE: sun_cloud/moon_cloud
+    # nudge the sun/moon up-left of the nominal box (for the "peeking out"
+    # look), which would otherwise clip against a sprite sized to exactly
+    # match the icon.
+    ICON_MARGIN = max(4, FLOAT_ICON_SIZE // 4)
+    icon_sprite = None
+    if weather_available:
+        sprite_size = FLOAT_ICON_SIZE + 2 * ICON_MARGIN
+        icon_sprite = Image.new("RGBA", (sprite_size, sprite_size), (0, 0, 0, 0))
+        _draw_weather_icon(ImageDraw.Draw(icon_sprite), ICON_MARGIN, ICON_MARGIN, icon_category, size=FLOAT_ICON_SIZE)
+
     frames = []
     for i in range(N_FRAMES):
         img = Image.new("RGB", (240, 240), color=BG_COLOR)
@@ -697,10 +808,12 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         _draw_walking_mascot(draw, walk_x, walk_baseline, leg_forward, blinking, scale=WALK_SCALE)
 
         # Weather icon (no temperature — that's back on the date line) floats
-        # above the mascot's head and tracks it left-right
-        if weather_available:
-            fx = walk_x - FLOAT_ICON_SIZE // 2
-            _draw_weather_icon(draw, fx, float_icon_y, icon_category, size=FLOAT_ICON_SIZE)
+        # above the mascot's head and tracks it left-right. Pasted from the
+        # pre-rendered sprite (drawn once above) rather than redrawn per frame.
+        if icon_sprite is not None:
+            fx = walk_x - icon_sprite.width // 2
+            fy = float_icon_y - ICON_MARGIN
+            img.paste(icon_sprite, (fx, fy), icon_sprite)
 
         frames.append(img)
 
