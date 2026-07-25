@@ -16,8 +16,8 @@ if ($TaskExists) {
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-# Create trigger (every 5 minutes)
-$Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 365)
+# Create trigger (every 1 minute)
+$Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 365)
 
 # Create action
 $Action = New-ScheduledTaskAction `
@@ -35,7 +35,7 @@ Register-ScheduledTask `
     -Force | Out-Null
 
 Write-Host "✅ Task '$TaskName' created successfully!" -ForegroundColor Green
-Write-Host "Task runs every 5 minutes"
+Write-Host "Task runs every 1 minute"
 Write-Host "Script path: $ScriptPath"
 Write-Host ""
 Write-Host "To view the task:"
