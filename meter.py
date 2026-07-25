@@ -846,7 +846,12 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     # the mascot's head height above walk_baseline never changes, only where
     # it is left-to-right. Mirrors the body_y formula inside
     # _draw_walking_mascot.
-    FLOAT_ICON_SIZE = 24  # +71% vs the base 14px icon — the old inline size read as invisible above the mascot
+    #
+    # Sized to the mascot's own body width (not a fixed constant) so the two
+    # stay proportional even if WALK_SCALE changes later — 0.9x keeps it
+    # well within the requested ±20% band.
+    mascot_body_w = max(4, int(42 * WALK_SCALE))
+    FLOAT_ICON_SIZE = round(mascot_body_w * 0.9)
     mascot_head_top = walk_baseline - max(2, int(14 * WALK_SCALE)) - max(1, int(8 * WALK_SCALE))
     FLOAT_GAP = 4
     float_icon_y = mascot_head_top - FLOAT_ICON_SIZE - FLOAT_GAP
