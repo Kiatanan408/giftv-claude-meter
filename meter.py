@@ -558,9 +558,13 @@ def _draw_weather_icon(draw, x, y, category):
         return
 
 
-TITLE_SCALE = 4
-LABEL_SCALE = 3
-SMALL_SCALE = 2
+TITLE_SCALE = 3
+LABEL_SCALE = 2
+SMALL_SCALE = 1
+
+TITLE_H = PIXEL_FONT_ROWS * TITLE_SCALE
+LABEL_H = PIXEL_FONT_ROWS * LABEL_SCALE
+SMALL_H = PIXEL_FONT_ROWS * SMALL_SCALE
 
 
 def draw_meter_image(state: dict, weather: dict = None) -> Path:
@@ -579,10 +583,9 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
 
     walk_left, walk_right = 40, 200
     walk_baseline = 236
-    BAR_WIDTH = 150  # narrower than the old full-width (228) bar — frees room
-    # beside it for the reset countdown, which used to need its own text row.
-    # That saved row is what pays for WALK_SCALE (1.3x) plus the carrot hat
-    # below without overflowing the 240px canvas — see README/commit notes.
+    BAR_WIDTH = 180  # widened back up from the previous 150 — shrinking every
+    # font a step (see TITLE/LABEL/SMALL_SCALE above) freed up enough width
+    # that the reset countdown beside the bar no longer needs as much room.
     BAR_HEIGHT = 16
     RIGHT_MARGIN = 6
 
@@ -604,9 +607,16 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     # Decide 1-line vs 2-line layout for date+weather up front (same for
     # every frame) — measure actual pixel width with our own font metrics,
     # the hand-drawn-font equivalent of a textbbox check.
-    date_row_y = 37
-    date_width = _pixel_text_width(datetime_text, SMALL_SCALE)
+    #
+    # This whole date/time/weather block gets its own padded "box" (extra
+    # gap above, extra gap below, text vertically centered against the
+    # 14px-tall weather icon) instead of being just another tight text row —
+    # smaller fonts elsewhere freed up vertical room, and this is where it
+    # was asked to go.
+    weather_box_y = 6 + TITLE_H + 6
+    text_center_offset = (WEATHER_ICON_SIZE - SMALL_H) // 2
     icon_gap, temp_gap = 4, 3
+    date_width = _pixel_text_width(datetime_text, SMALL_SCALE)
     if weather_available:
         temp_width = _pixel_text_width(temp_text, SMALL_SCALE)
         one_line_width = date_width + icon_gap + WEATHER_ICON_SIZE + temp_gap + temp_width
@@ -615,19 +625,22 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         one_line_fits = True
 
     if weather_available and one_line_fits:
-        weather_row_y = date_row_y
-        content_top_y = date_row_y + 14 + 3
+        icon_row_y = weather_box_y
+        text_row_y = weather_box_y + text_center_offset
+        content_top_y = weather_box_y + WEATHER_ICON_SIZE + 8
     elif weather_available:
-        weather_row_y = date_row_y + 14 + 2
-        content_top_y = weather_row_y + 14 + 3
+        text_row_y = weather_box_y
+        icon_row_y = weather_box_y + SMALL_H + 3
+        content_top_y = icon_row_y + WEATHER_ICON_SIZE + 8
     else:
-        weather_row_y = None
-        content_top_y = date_row_y + 14 + 3
+        text_row_y = weather_box_y
+        icon_row_y = None
+        content_top_y = weather_box_y + SMALL_H + 8
 
     cur_label_y = content_top_y
-    cur_bar_y = cur_label_y + 21 + 3
+    cur_bar_y = cur_label_y + LABEL_H + 3
     week_label_y = cur_bar_y + BAR_HEIGHT + 4
-    week_bar_y = week_label_y + 21 + 3
+    week_bar_y = week_label_y + LABEL_H + 3
 
     frames = []
     for i in range(N_FRAMES):
@@ -643,17 +656,19 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
         # its own second small line if it doesn't fit next to the date)
         if weather_available and one_line_fits:
             cx = 6
-            cx += _draw_pixel_text(draw, cx, date_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+            cx += _draw_pixel_text(draw, cx, text_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
             cx += icon_gap
-            _draw_weather_icon(draw, cx, date_row_y, icon_category)
+            _draw_weather_icon(draw, cx, icon_row_y, icon_category)
             cx += WEATHER_ICON_SIZE + temp_gap
-            _draw_pixel_text(draw, cx, date_row_y, temp_text, SMALL_SCALE, TEXT_COLOR)
+            _draw_pixel_text(draw, cx, text_row_y, temp_text, SMALL_SCALE, TEXT_COLOR)
         elif weather_available:
-            _draw_pixel_text(draw, 6, date_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
-            _draw_weather_icon(draw, 6, weather_row_y, icon_category)
-            _draw_pixel_text(draw, 6 + WEATHER_ICON_SIZE + temp_gap, weather_row_y, temp_text, SMALL_SCALE, TEXT_COLOR)
+            _draw_pixel_text(draw, 6, text_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+            _draw_weather_icon(draw, 6, icon_row_y, icon_category)
+            _draw_pixel_text(
+                draw, 6 + WEATHER_ICON_SIZE + temp_gap, icon_row_y + text_center_offset, temp_text, SMALL_SCALE, TEXT_COLOR
+            )
         else:
-            _draw_pixel_text(draw, 6, date_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
+            _draw_pixel_text(draw, 6, text_row_y, datetime_text, SMALL_SCALE, DIM_TEXT_COLOR)
 
         # Current bar — reset countdown sits beside it (not its own row
         # anymore) to keep the section compact
