@@ -428,11 +428,12 @@ def _draw_bevel_block(draw, x0, y0, x1, y1, base, light, dark, bevel=2):
 def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
     """
     Blocky pixel mascot at (x, y_baseline) — feet touch y_baseline. Squat
-    proportions (wide, short body, no arms, 4 legs spread across the width)
-    adapted from the make_mascot_squat.py reference's 7x2-unit body/leg
-    layout. Body and legs use bevel-shaded blocks (light top/left, dark
-    bottom/right), plus a soft ground shadow beneath the feet; eyes stay
-    flat (no bevel) so they read clearly against the shaded body.
+    proportions (wide, short body, 4 legs spread across the width) adapted
+    from the make_mascot_squat.py reference's 7x2-unit body/leg layout,
+    plus long arms (matching _draw_header_mascot's look). Body, legs, and
+    arms use bevel-shaded blocks (light top/left, dark bottom/right), plus
+    a soft ground shadow beneath the feet; eyes stay flat (no bevel) so
+    they read clearly against the shaded body.
     leg_forward: alternates which diagonal pair of the 4 legs is raised,
     the walk cadence (equivalent to the old 2-leg stagger, extended to 4).
     blinking: True draws closed eyes for this frame
@@ -469,6 +470,17 @@ def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
         raised = (idx % 2 == 0) == leg_forward  # alternating diagonal pairs, like a 4-legged trot
         ly = leg_y - leg_stagger if raised else leg_y
         _draw_bevel_block(draw, leg_x, ly, leg_x + leg_w, ly + leg_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
+
+    # Long arms attached at the body's vertical middle, same idea as
+    # _draw_header_mascot's. Trimmed down from an initial 0.35x — that
+    # read as too long once seen on the actual device.
+    arm_len = max(1, int(0.24 * body_w))
+    arm_h = max(1, int(6 * scale))
+    arm_y = body_y + (body_h - arm_h) // 2
+    _draw_bevel_block(draw, body_x - arm_len, arm_y, body_x, arm_y + arm_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
+    _draw_bevel_block(
+        draw, body_x + body_w, arm_y, body_x + body_w + arm_len, arm_y + arm_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel
+    )
 
     # Body
     _draw_bevel_block(draw, body_x, body_y, body_x + body_w, body_y + body_h, MASCOT_COLOR, MASCOT_LIGHT, MASCOT_DARK, bevel)
