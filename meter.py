@@ -444,7 +444,7 @@ def _draw_walking_mascot(draw, x, y_baseline, leg_forward, blinking, scale=1.0):
     Used only for the walking mascot at the bottom now — the CLAUDE title
     row has its own distinct _draw_header_mascot (tall, with arms) below.
     """
-    body_w, body_h = max(4, int(42 * scale)), max(2, int(18 * scale))
+    body_w, body_h = max(4, int(42 * scale)), max(2, int(22 * scale))
     body_x = x - body_w // 2
     body_y = y_baseline - body_h - max(1, int(8 * scale))  # leave room for legs below body
     bevel = max(1, round(2 * scale))
@@ -872,7 +872,7 @@ def draw_meter_image(state: dict, weather: dict = None) -> Path:
     # well within the requested ±20% band.
     mascot_body_w = max(4, int(42 * WALK_SCALE))
     FLOAT_ICON_SIZE = round(mascot_body_w * 0.9)
-    mascot_head_top = walk_baseline - max(2, int(18 * WALK_SCALE)) - max(1, int(8 * WALK_SCALE))
+    mascot_head_top = walk_baseline - max(2, int(22 * WALK_SCALE)) - max(1, int(8 * WALK_SCALE))
     FLOAT_GAP = 4
     float_icon_y = mascot_head_top - FLOAT_ICON_SIZE - FLOAT_GAP
 
