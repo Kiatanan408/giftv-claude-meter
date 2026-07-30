@@ -971,7 +971,7 @@ def upload_to_giftv(image_path: Path) -> bool:
     # Verify via /filelist (lowercase; returns an HTML <table>, not JSON)
     try:
         verify_url = f"http://{GIFTV_IP}/filelist?dir=/image/"
-        response = requests.get(verify_url, timeout=5)
+        response = requests.get(verify_url, timeout=15)
         if image_path.name in response.text:
             log_message(f"Upload verified via filelist: {image_path.name}")
             return True
