@@ -150,7 +150,11 @@ pip install claude-monitor --break-system-packages
 # add the statusLine hook to Claude Code settings (see above), then
 # open Claude Code and send one message so the hook fires at least once
 
-# register the 5-minute scheduled task
+# register the scheduled task (runs meter.py every 1 minute)
+# No need to launch an elevated shell yourself — the script self-elevates and
+# Windows will show a UAC prompt; click Yes. It then re-runs itself as
+# Administrator in a new window and verifies the task really got created,
+# printing the NextRunTime it read back.
 powershell -ExecutionPolicy Bypass -File setup-task.ps1
 
 # test once by hand
